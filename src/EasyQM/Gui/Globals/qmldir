@@ -1,0 +1,4 @@
+module Globals
+
+singleton ApplicationInfo ApplicationInfo.qml
+singleton References References.qml

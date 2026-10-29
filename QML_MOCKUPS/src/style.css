@@ -1,0 +1,160 @@
+/* EasyApp light theme, values taken from EasyApplication/Gui/Style/{Colors,Sizes}.qml (fontPixelSize = 14) */
+@font-face { font-family: 'PT Sans'; src: url('fonts/PTSans-Regular.ttf'); font-weight: normal; }
+@font-face { font-family: 'PT Sans'; src: url('fonts/PTSans-Bold.ttf'); font-weight: bold; }
+@font-face { font-family: 'PT Mono'; src: url('fonts/PTMono-Regular.ttf'); }
+@font-face { font-family: 'Encode Sans'; src: url('fonts/EncodeSans-ExtraLight.ttf'); font-weight: 200; }
+@font-face { font-family: 'FA'; src: url('fonts/FA5-Solid.otf'); }
+
+:root {
+  --accent: #00a3e3;  --accent-minor: #8ad6ed;
+  --bg: #e9e9e9;  --bg-h1: #fefefe;  --bg-h2: #f7f7f7;
+  --row-hover: #E6F5FC;  --row-hl: #DCF0FA;
+  --fg: #333;  --fg-minor: #aaa;  --fg-dis: #bbb;  --fg-hl: #FF5722;
+  --app-border: #ddd;  --bar-border: #d6d6d6;
+  --content: #f4f4f4;  --main: #fff;
+  --combo-bg: rgba(255,255,255,.44);  --combo-border: #dedede;
+  --table-hl: rgba(0,163,227,.125);
+  --blue: #39abdf;  --red: #FF5722;  --green: #7aaa42;  --orange: #FF9800;
+  --status-text: #777;  --status-icon: #999;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: #fff; }
+body { font: 14px/1.25 'PT Sans', sans-serif; color: var(--fg); }
+i, .fa { font-family: 'FA'; font-style: normal; font-weight: 900; }
+sub { font-size: .75em; line-height: 0; }
+.mono { font-family: 'PT Mono', monospace; }
+
+/* window + title bar (Windows frame around the Qt window) */
+.win { width: 1600px; display: flex; flex-direction: column; border: 1px solid #c9c9c9; background: var(--content); }
+.titlebar { height: 31px; background: #fff; display: flex; align-items: center; padding-left: 10px; font-size: 12px; color: #222; font-family: 'Segoe UI', sans-serif; flex: none; }
+.titlebar .ti { width: 14px; height: 14px; border-radius: 3px; background: var(--accent); margin-right: 8px; }
+.titlebar .wc { margin-left: auto; display: flex; height: 100%; }
+.titlebar .wc span { width: 46px; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+
+/* application bar */
+.appbar { height: 77px; background: var(--bg); border-bottom: 1px solid var(--bar-border); position: relative; flex: none; }
+.appbar .left, .appbar .right { position: absolute; top: 21px; display: flex; gap: 4px; }
+.appbar .left { left: 14px; } .appbar .right { right: 14px; }
+.abtn { width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; font: 17px 'FA'; color: #444; }
+.abtn.dis { color: var(--fg-dis); }
+.tabs { position: absolute; left: 50%; top: 0; height: 77px; transform: translateX(-50%); display: flex; }
+.tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 58px; padding: 0 10.5px; color: var(--fg); }
+.tab .ico { font: 21px/24px 'FA'; }
+.tab .lbl { font-size: 13.3px; }
+.tab.active { color: var(--accent); }
+.tab.active .lbl { font-weight: bold; }
+.tab.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
+.tab.dis { color: var(--fg-dis); }
+
+/* body: main area + sidebar */
+.body { display: flex; flex: none; }
+.main { flex: 1; background: var(--main); position: relative; overflow: hidden; display: flex; flex-direction: column; }
+.side { width: 584px; flex: none; background: var(--content); border-left: 1px solid var(--app-border); position: relative; overflow: hidden; }
+
+/* tab bars (main area and sidebar) */
+.tabbar { height: 42px; display: flex; border-bottom: 1px solid var(--app-border); flex: none; position: relative; }
+.tabbar .t { position: relative; padding: 0 10.5px; line-height: 41px; margin-left: 0; }
+.tabbar .t.on { color: var(--accent); font-weight: bold; }
+.tabbar .t.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); }
+.tabbar.side-t { padding-left: 6px; }
+
+/* group boxes */
+.grp { border-bottom: 1px solid var(--app-border); padding-bottom: 14px; }
+.grp.col { padding-bottom: 0; }
+.gh { height: 42px; display: flex; align-items: center; padding-left: 7px; gap: 7px; }
+.gh .car { font: 9.8px 'FA'; width: 10px; text-align: center; }
+.gh .gi { font: 14px 'FA'; width: 14px; text-align: center; }
+.gh.open { color: var(--accent); }
+.gh.open .car { transform: rotate(90deg); }
+.gh .note { margin-left: auto; margin-right: 14px; color: var(--fg-minor); }
+.gb { padding: 7px 14px 0; }
+.hint { color: #888; font-size: 13px; line-height: 1.3; margin: 2px 0 8px; }
+
+/* form controls */
+.row { display: flex; align-items: center; min-height: 35px; margin-bottom: 8px; }
+.row > .l { width: 168px; flex: none; }
+.row > .c { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.row.tight { margin-bottom: 4px; min-height: 28px; }
+.inp { height: 35px; border: 1px solid var(--combo-border); background: var(--combo-bg); border-radius: 2px; padding: 0 9px; display: flex; align-items: center; width: 100%; min-width: 0; white-space: nowrap; overflow: hidden; }
+.inp.ro { color: #888; background: rgba(255,255,255,.2); }
+.inp.foc { border-color: var(--accent); background: rgba(255,255,255,.75); }
+.inp .car { margin-left: auto; font: 14px 'FA'; color: #999; padding-left: 8px; }
+.inp .u { color: var(--fg-minor); margin-left: auto; padding-left: 8px; }
+.chk { width: 21px; height: 21px; border-radius: 2px; border: 1px solid var(--combo-border); background: var(--bg-h2); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.chk.on { background: var(--accent); border-color: var(--accent); color: #fff; font: 12px 'FA'; }
+.chk.dis { border-color: var(--fg-dis); background: transparent; }
+.chk.on.dis { background: var(--fg-dis); border-color: var(--fg-dis); }
+.btn { height: 38.5px; border-radius: 2px; background: var(--bg); border: 1px solid var(--bg); display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; white-space: nowrap; }
+.btn i { font-size: 17.5px; }
+.btn.wide { width: 100%; } .btn.half { width: 271px; } .btn.sm { height: 35px; padding: 0 12px; }
+.btn.dis { color: var(--fg-dis); background: var(--bg); }
+.btn .ic-green { color: var(--green); } .btn .ic-red { color: var(--red); } .btn .ic-acc { color: var(--accent); }
+.btn.flat { background: transparent; border-color: transparent; }
+.btnrow { display: flex; gap: 14px; margin-bottom: 8px; }
+.tool { width: 35px; height: 35px; background: var(--bg); border-radius: 2px; display: inline-flex; align-items: center; justify-content: center; font: 15px 'FA'; color: var(--fg); }
+.tool.on { color: var(--accent); }
+.tool.dis { color: var(--fg-dis); }
+.toolbar { display: flex; gap: 2px; }
+.toolbar .gap { width: 14px; }
+
+/* segmented (radio) buttons: EasyApp TabBar-like text buttons */
+.seg { display: inline-flex; border: 1px solid var(--combo-border); border-radius: 2px; height: 35px; }
+.seg span { padding: 0 14px; display: flex; align-items: center; border-right: 1px solid var(--combo-border); }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--row-hl); color: var(--accent); font-weight: bold; }
+.seg span.dis { color: var(--fg-dis); }
+
+/* tables (EasyApp TableView) */
+.tbl { width: 100%; border-collapse: collapse; border: 1px solid var(--combo-border); }
+.tbl th { height: 38.5px; background: var(--content); color: #999; font-weight: normal; text-align: left; padding: 0 9px; white-space: nowrap; }
+.tbl td { height: 38.5px; padding: 0 9px; white-space: nowrap; }
+.tbl tbody tr:nth-child(odd) td { background: var(--bg-h1); }
+.tbl tbody tr:nth-child(even) td { background: var(--bg-h2); }
+.tbl tbody tr.sel td { background: #E7F5FC; }
+.tbl .n { color: #999; width: 28px; padding-right: 0; }
+.tbl .r { text-align: right; } .tbl .c { text-align: center; }
+.tbl.tall td { height: 54px; white-space: normal; line-height: 1.2; }
+.tbl .dim td { color: var(--fg-dis); }
+.tbl .dim td b { color: #aaa; }
+.tbl .minor { color: #888; }
+
+/* status pills (EasyQuantum specific; uses EasyApp semantic colours) */
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px; border-radius: 11px; font-size: 13px; height: 22px; background: #eee; color: #666; }
+.pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.green { background: rgba(122,170,66,.17); color: #55832a; }
+.pill.blue { background: rgba(0,163,227,.13); color: #0086bb; }
+.pill.orange { background: rgba(255,152,0,.17); color: #b36b00; }
+.pill.red { background: rgba(255,87,34,.14); color: #d4400f; }
+.pill.grey { background: #ececec; color: #888; }
+.pill.tag::before { display: none; } .pill.tag { border-radius: 3px; font-size: 12.5px; height: 20px; padding: 0 9px; background: #eee; color: #888; }
+
+/* main-area sections */
+.sec { padding: 0 21px; }
+.sh { height: 42px; display: flex; align-items: center; gap: 7px; color: var(--accent); }
+.sh .car { font: 9.8px 'FA'; width: 10px; text-align: center; transform: rotate(90deg); }
+.sh .gi { font: 14px 'FA'; }
+.sh .note { margin-left: auto; color: var(--fg-minor); }
+.kv { display: grid; grid-template-columns: 110px 1fr; row-gap: 4px; column-gap: 21px; }
+.kv b { font-weight: bold; }
+.title-xl { font: 200 42px/1.15 'Encode Sans', sans-serif; letter-spacing: -.2px; }
+.sep { height: 1px; background: var(--app-border); }
+
+/* log / text view (EasyApp TextArea on textViewBackground) */
+.log { background: var(--bg-h1); border: 1px solid var(--combo-border); border-radius: 2px; font: 12.5px/1.42 'PT Mono', monospace; padding: 9px 14px; white-space: pre; overflow: hidden; position: relative; color: #333; }
+.log .hl { background: #fff3a8; }
+
+/* status bar */
+.status { height: 35px; background: var(--bg); border-top: 1px solid var(--bar-border); display: flex; align-items: center; padding: 0 14px; gap: 40px; flex: none; }
+.status .it { display: flex; align-items: center; gap: 7px; }
+.status .it i { font-size: 13.5px; color: var(--status-icon); }
+.status .it .k { color: var(--status-text); }
+.status .it .v { color: var(--fg); }
+
+/* sidebar footer */
+.foot { position: absolute; left: 0; right: 0; bottom: 0; padding-bottom: 14px; display: flex; justify-content: center; background: linear-gradient(to bottom, rgba(244,244,244,0), #f4f4f4 40%); padding-top: 18px; }
+.foot .btn { background: transparent; border-color: transparent; }
+
+/* charts (EasyApp chart colours, light) */
+.chartwrap { position: relative; }
+.chartwrap .toolbar { position: absolute; top: 14px; right: 21px; }
+svg text { font-family: 'PT Sans', sans-serif; fill: #333; }

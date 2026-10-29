@@ -1,0 +1,64 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body>
+  <div class="win" style="height:1000px"><div class="titlebar"><div class="ti"></div>EasyQuantum<div class="wc"><span>&#x2014;</span><span>&#x25A1;</span><span>&#x2715;</span></div></div><div class="appbar">
+    <div class="left"><div class="abtn"><i class="">&#xf0c7;</i></div><div class="abtn"><i class="">&#xf0e2;</i></div></div>
+    <div class="tabs"><div class="tab "><span class="ico"><i class="">&#xf015;</i></span><span class="lbl">Home</span></div><div class="tab "><span class="ico"><i class="">&#xf187;</i></span><span class="lbl">Project</span></div><div class="tab "><span class="ico"><i class="">&#xf5d2;</i></span><span class="lbl">Sample</span></div><div class="tab "><span class="ico"><i class="">&#xf0ae;</i></span><span class="lbl">Calculations</span></div><div class="tab active"><span class="ico"><i class="">&#xf1ec;</i></span><span class="lbl">Method</span></div><div class="tab "><span class="ico"><i class="">&#xf46d;</i></span><span class="lbl">Summary</span></div></div>
+    <div class="right"><div class="abtn"><i class="">&#xf013;</i></div><div class="abtn"><i class="">&#xf059;</i></div><div class="abtn"><i class="">&#xf188;</i></div></div>
+  </div>
+    <div class="body" style="height:854px">
+      <div class="main"><div style="padding:0 21px">
+      <div class="sh" style="padding:0"><span class="car">&#xf04b;</span><span>Engine</span>
+        <span style="margin-left:auto;display:flex;gap:8px"><div class="btn sm"><i class="">&#xf2f1;</i>Re-detect</div><div class="btn sm"><i class="">&#xf013;</i>Configure paths...</div></span></div>
+      <div style="display:flex;gap:14px">
+        <div style="flex:1;border:1px solid var(--accent);border-radius:2px;background:var(--row-hover);padding:12px 14px;">
+      <div style="display:flex;align-items:center"><b style="font-size:15px">ORCA</b><span class="pill green" style="margin-left:auto">Found</span></div>
+      <div style="color:#666;margin-top:6px">Version 6.0.1 &#183; MPI (OpenMPI 4.1)</div><div class="mono" style="color:#999;font-size:12.5px;margin-top:3px">/opt/orca/6.0.1/orca</div></div>
+        <div style="flex:1;border:1px solid var(--combo-border);border-radius:2px;background:#fff;padding:12px 14px;">
+      <div style="display:flex;align-items:center"><b style="font-size:15px">PSI4</b><span class="pill green" style="margin-left:auto">Found</span></div>
+      <div style="color:#666;margin-top:6px">Version 1.9.1 &#183; conda env &#8220;psi4&#8221;</div><div class="mono" style="color:#999;font-size:12.5px;margin-top:3px">~/miniconda3/envs/psi4/bin/psi4</div></div>
+        <div style="flex:1;border:1px solid var(--combo-border);border-radius:2px;background:#fff;padding:12px 14px;opacity:.9">
+      <div style="display:flex;align-items:center"><b style="font-size:15px">CASTEP</b><span class="pill orange" style="margin-left:auto">Not found</span></div>
+      <div style="color:#666;margin-top:6px">Not detected &#183; periodic systems only</div><div class="mono" style="color:#999;font-size:12.5px;margin-top:3px">castep.mpi &#8212; set path in Configure</div></div>
+      </div></div>
+    <div style="padding:0 21px;margin-top:14px;flex:1;display:flex;flex-direction:column">
+      <div class="sh" style="padding:0"><span class="car">&#xf04b;</span><span>Run</span>
+        <span style="margin-left:auto;display:flex;gap:8px"><div class="btn sm"><i class="">&#xf06e;</i>Preview input</div><div class="btn sm"><i class="">&#xf019;</i>Save inputs</div></span></div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:2px">
+        <div class="seg"><span class="on">Run locally</span><span class="dis">Remote / cluster (later)</span></div>
+        <span style="color:#888">Cores:</span><div style="width:110px"><div class="inp  ">8</div></div>
+        <span style="color:#888">Memory:</span><div style="width:140px"><div class="inp  ">16<span class="u">GB</span></div></div>
+        <span style="margin-left:auto;display:flex;gap:8px"><div class="btn sm"><i class="ic-green">&#xf144;</i>Run workflow</div><div class="btn sm"><i class="ic-red">&#xf04d;</i>Stop</div></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin:12px 0">
+        <span class="pill green">1 Optimisation</span><span style="color:#aaa;font:13px 'FA'">&#xf061;</span><span class="pill blue">2 Single point</span><span style="color:#aaa;font:13px 'FA'">&#xf061;</span><span class="pill grey">3 Frequencies</span>
+        <div style="flex:1;height:4px;background:var(--app-border);border-radius:2px;margin-left:10px"><div style="width:48%;height:100%;background:var(--accent);border-radius:2px"></div></div>
+        <span style="color:#777">48 % &#183; 1 min 52 s</span></div>
+      <div class="log" style="flex:1;margin-bottom:21px">                         * O   R   C   A *
+                  Program Version 6.0.1 - RELEASE
+------------------------------------------------------------------------
+| 1> ! B3LYP D3BJ def2-TZVP def2/J RIJCOSX TightSCF Opt Freq
+| 2> %pal nprocs 8 end
+| 3> * xyzfile 0 1 structure.xyz
+------------------------------------------------------------------------
+                       ****************************
+                       * Geometry Optimization Run *
+                       ****************************
+Geometry convergence criteria ..... TIGHT
+
+                 ***  Starting incremental Fock matrix formation  ***
+ITER       Energy         Delta-E        Max-DP      RMS-DP      [F,P]     Damp
+  0   -232.1894273031   0.000000000000 0.00342118  0.00008121  0.0251389 0.7000
+  1   -232.2097105118  -0.020283208695 0.00185422  0.00005081  0.0119874 0.7000
+  5   -232.2503771960  -0.000001244731 0.00000917  0.00000041  0.0000410 0.0000
+               **** Energy Check signals convergence ****
+FINAL SINGLE POINT ENERGY      -232.250377198640
+                 -------------------------------------------
+                 |     GEOMETRY OPTIMIZATION CYCLE   4     |
+                 -------------------------------------------
+         Energy change      -0.0000061240      0.0000010000      NO
+         RMS gradient        0.0000098421      0.0000300000      YES
+         MAX gradient        0.0000273110      0.0001000000      YES
+         RMS step            0.0001102938      0.0006000000      YES
+         MAX step            0.0003311421      0.0010000000      YES<div style="position:absolute;top:8px;right:10px;display:flex;gap:6px;font-family:'PT Sans'"><span class="pill grey" style="background:var(--bg)">orca.out</span><span class="pill grey" style="background:var(--bg)">follow <i class="">&#xf00c;</i></span></div></div>
+    </div></div>
+      <div class="side"><div class="tabbar side-t"><div class="t on">Basic controls</div><div class="t ">Extra controls</div></div><div class="grp "><div class="gh open"><span class="car"><i class="">&#xf04b;</i></span><span class="gi"><i class="">&#xf5d2;</i></span>Level of theory</div><div class="gb"><div class="row "><div class="l">Method:</div><div class="c"><div class="inp">DFT<span class="car">&#xf0d7;</span></div></div></div><div class="row "><div class="l">Functional:</div><div class="c"><div class="inp">B3LYP<span class="car">&#xf0d7;</span></div></div></div><div class="row "><div class="l">Dispersion:</div><div class="c"><div class="inp">D3(BJ)<span class="car">&#xf0d7;</span></div></div></div><div class="row "><div class="l">Basis set:</div><div class="c"><div class="inp">def2-TZVP<span class="car">&#xf0d7;</span></div></div></div><div class="row "><div class="l">Auxiliary basis:</div><div class="c"><div class="inp">def2/J (RIJCOSX)<span class="car">&#xf0d7;</span></div></div></div></div></div><div class="grp "><div class="gh open"><span class="car"><i class="">&#xf04b;</i></span><span class="gi"><i class="">&#xf1de;</i></span>System</div><div class="gb"><div class="row "><div class="l">Charge:</div><div class="c"><div class="inp ro ">0</div></div></div><div class="row "><div class="l">Multiplicity:</div><div class="c"><div class="inp ro ">1</div></div></div><div class="row "><div class="l">Reference:</div><div class="c"><div class="inp">RKS (closed shell)<span class="car">&#xf0d7;</span></div></div></div><div class="row "><div class="l">Solvation:</div><div class="c"><div class="inp">None<span class="car">&#xf0d7;</span></div></div></div></div></div><div class="grp "><div class="gh open"><span class="car"><i class="">&#xf04b;</i></span><span class="gi"><i class="">&#xf085;</i></span>SCF</div><div class="gb"><div class="row "><div class="l">Convergence:</div><div class="c"><div class="inp">Tight (1e-8 Eh)<span class="car">&#xf0d7;</span></div></div></div><div class="row "><div class="l">Max. iterations:</div><div class="c"><div class="inp  ">125</div></div></div><div class="row "><div class="l">Integration grid:</div><div class="c"><div class="inp">DefGrid2<span class="car">&#xf0d7;</span></div></div></div><div class="row"><div class="c" style="gap:10px"><span class="chk  "></span><span>Stability check</span></div></div></div></div><div class="grp col"><div class="gh "><span class="car"><i class="">&#xf04b;</i></span><span class="gi"><i class="">&#xf1c9;</i></span>Engine-specific (ORCA)<span class="note">extra controls</span></div></div></div>
+    </div><div class="status"><div class="it"><i class="">&#xf187;</i><span class="k">Project</span><span class="v">benzene_b3lyp</span></div><div class="it"><i class="">&#xf1ec;</i><span class="k">Engine</span><span class="v">ORCA 6.0.1</span></div><div class="it"><i class="">&#xf144;</i><span class="k">Job</span><span class="v">running &#8212; step 2/3</span></div><div class="it"><i class="">&#xf2db;</i><span class="k">PID</span><span class="v">48213 &#183; 8 threads &#183; 3.1 GB</span></div></div></div></body></html>
