@@ -2,8 +2,6 @@
 
 *A GUI for running quantum-chemistry codes, built on the EasyScience / EasyApp framework.*
 
-Status: proposal, no code. Companion mock-ups live in `docs/mockups/*.png`.
-
 ---
 
 ## 1. Purpose and scope
@@ -41,7 +39,7 @@ Steps unlock in order: Sample needs a project decision, Calculations needs a str
 Method needs at least one calculation ticked, Summary needs a finished (or running) job.
 Going back is always allowed; editing an upstream step marks downstream results as stale.
 
-![workflow](docs/mockups/00_workflow.png)
+![workflow](QML_MOCKUPS/00_workflow.png)
 
 ### Common chrome (all tabs)
 
@@ -58,7 +56,7 @@ Going back is always allowed; editing an upstream step marks downstream results 
 
 ### 3.1 Project
 
-![project](docs/mockups/01_project.png)
+![project](QML_MOCKUPS/01_project.png)
 
 Main area: a *Current project* card (name, description, folder, dates, and a one-line
 summary of sample / calculations / engine / status / files) and a *Recent projects* table.
@@ -82,7 +80,7 @@ benzene_b3lyp/
 
 ### 3.2 Sample
 
-![sample](docs/mockups/02_sample.png)
+![sample](QML_MOCKUPS/02_sample.png)
 
 Main area, left card: **structure viewer** (ball-and-stick / wireframe / spacefill, labels,
 measure tool, axes gizmo). Clicking two atoms shows the distance, three atoms an angle, four
@@ -113,7 +111,7 @@ offered, and switches coordinate defaults to fractional.
 
 ### 3.3 Calculations (replaces Experiment)
 
-![calculations](docs/mockups/03_calculations.png)
+![calculations](QML_MOCKUPS/03_calculations.png)
 
 Main area: a **check-list table** of calculation types. Each row has a checkbox, a name,
 a one-line description, the main results it produces and a notes column that states
@@ -146,7 +144,7 @@ estimated cost once an engine and method are chosen.
 
 ### 3.4 Method (replaces Analysis)
 
-![method](docs/mockups/04_method.png)
+![method](QML_MOCKUPS/04_method.png)
 
 Main area, top: **Engine cards** for ORCA, PSI4 and CASTEP. On start-up the app probes
 `PATH`, conda environments and a user-configured path list, and shows version and
@@ -179,7 +177,7 @@ flags what does not.
 
 ### 3.5 Summary
 
-![summary](docs/mockups/05_summary.png)
+![summary](QML_MOCKUPS/05_summary.png)
 
 Main area, top: a row of **stat tiles** — one per headline number from the calculations
 ticked in step 3: final energy, optimisation converged / steps, number of imaginary modes,
@@ -265,13 +263,13 @@ Key design rules:
 
 | File | Tab |
 |---|---|
-| `docs/mockups/00_workflow.png` | Workflow and layering overview |
-| `docs/mockups/01_project.png` | Project |
-| `docs/mockups/02_sample.png` | Sample |
-| `docs/mockups/03_calculations.png` | Calculations |
-| `docs/mockups/04_method.png` | Method (job running) |
-| `docs/mockups/05_summary.png` | Summary (job finished) |
+| `QML_MOCKUPS/00_workflow.png` | Workflow and layering overview |
+| `QML_MOCKUPS/01_project.png` | Project |
+| `QML_MOCKUPS/02_sample.png` | Sample |
+| `QML_MOCKUPS/03_calculations.png` | Calculations |
+| `QML_MOCKUPS/04_method.png` | Method (job running) |
+| `QML_MOCKUPS/05_summary.png` | Summary (job finished) |
 
-The mock-ups are generated from HTML in `docs/mockups/src/` (`node render.js`
+The mock-ups are generated from HTML in `QML_MOCKUPS/src/` (`node render.js`
 re-creates the PNGs with the pre-installed Playwright/Chromium), so they can be edited as
 text when the design changes.
