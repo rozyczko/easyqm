@@ -5,6 +5,7 @@
 import json
 import sys
 import time
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QSettings
@@ -15,9 +16,13 @@ from Backends.Py.logic.engines.base import Capabilities
 from Backends.Py.logic.engines.base import EngineAdapter
 from Backends.Py.logic.engines.base import EngineInfo
 from Backends.Py.logic.engines.orca import CAPABILITIES
+from Backends.Py.logic.engines.orca import OrcaAdapter
 from Backends.Py.logic.method import RunSettings
+from Backends.Py.logic.results import Results as ResultsLogic
+from Backends.Py.logic.runner import JobState
 from Backends.Py.method import Method
 from Backends.Py.py_backend import PyBackend
+from Backends.Py.results import Results
 from Backends.Py.sample import Sample
 
 
@@ -313,3 +318,88 @@ def test_workflow_label_follows_single_point_geometry(qcore_application):
         'Single point energy (at input geometry)',
         'Geometry optimisation',
     ]
+
+
+# Results (Summary page)
+
+WATER = Path(__file__).parent / 'data' / 'orca_water_opt_freq.out'
+
+
+def _water() -> ResultsLogic:
+    return OrcaAdapter().parse(WATER.read_text(encoding='utf-8'))
+
+
+def test_results_offer_only_what_was_found(qcore_application):
+    results = Results()
+    assert not results.available and results.placeholder.startswith('No results yet')
+
+    results.clear('HF/def2-SVP')
+    assert results.placeholder.startswith('The results appear here')
+
+    single_point = _water()
+    single_point.optimisation = single_point.frequencies = None
+    results.set_results(single_point)
+    assert [tile['title'] for tile in results.tiles] == ['Final energy (Eh)', 'HOMO–LUMO gap (eV)', 'Dipole moment (D)']
+    assert results.tiles[0] == {'title': 'Final energy (Eh)', 'value': '−76.301100', 'detail': 'HF/def2-SVP', 'tone': ''}
+    assert results.tiles[2]['detail'] == 'at the input geometry'
+    assert not results.hasOptimisation and not results.hasFrequencies
+    assert results.geometryRows == [] and results.modes == []
+
+    results.set_results(ResultsLogic())
+    assert not results.available and results.placeholder.startswith('The output of the last job holds no results')
+
+
+def test_results_of_an_optimisation_with_frequencies(qcore_application):
+    results = Results()
+    changes = _emissions(results.resultsChanged)
+    results.set_results(_water())
+
+    assert len(changes) == 1 and results.available and results.placeholder == ''
+    assert [tile['title'] for tile in results.tiles] == [
+        'Final energy (Eh)',
+        'Optimisation',
+        'Imaginary modes',
+        'HOMO–LUMO gap (eV)',
+        'Dipole moment (D)',
+        'Gibbs free energy (Eh)',
+    ]
+    optimisation, imaginary, gap = results.tiles[1], results.tiles[2], results.tiles[3]
+    assert (optimisation['value'], optimisation['tone']) == ('Converged', 'good')
+    assert optimisation['detail'] == '2 steps · ΔE = −0.69 kcal/⁠mol'
+    assert (imaginary['value'], imaginary['tone']) == ('1', 'warning')
+    assert imaginary['detail'].startswith('not a minimum · ZPE 13.2')
+    assert gap['value'] == '10.34' and gap['detail'] == 'HOMO −8.71 · LUMO 1.63'
+    assert results.tiles[5]['detail'] == '298.15 K, 1 atm'
+
+    assert results.geometryRows[0] == {
+        'bond': 'O1–H2',
+        'bondInitial': '0.9567',
+        'bondFinal': '0.9621',
+        'bondChange': '+0.0054',
+        'angle': 'H2–O1–H3',
+        'angleFinal': '104.35',
+    }
+    assert results.geometryRows[1]['angle'] == '' and len(results.geometryRows) == 2
+    assert results.convergenceRows[0] == {
+        'criterion': 'Energy change',
+        'value': '−5.00e−07',
+        'tolerance': '1.0e-06',
+        'met': True,
+    }
+
+    assert results.hasFrequencies and results.hasRaman
+    assert results.modes[0]['imaginary'] and results.modes[0]['frequencyText'] == '−50.00'
+    assert results.modes[2]['irIntensity'] == 5.0 and results.modes[2]['ramanText'] == '90.00'
+
+
+def test_backend_parses_the_output_when_the_job_ends(backend):
+    backend.job._set_state(JobState.RUNNING, '')
+    assert not backend.results.available
+    assert backend.results.placeholder.startswith('The results appear here')
+
+    backend.job._chunks = [WATER.read_text(encoding='utf-8')]
+    backend.job._set_state(JobState.COMPLETED, '')
+
+    assert backend.results.available
+    assert backend.results.tiles[0]['detail'] == 'B3LYP-D3(BJ)/def2-TZVP'
+    assert backend.results.hasOptimisation and backend.results.hasFrequencies

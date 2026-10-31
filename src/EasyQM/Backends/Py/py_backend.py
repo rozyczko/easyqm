@@ -5,8 +5,10 @@ from PySide6.QtCore import QObject
 
 from .calculations import Calculations
 from .job import Job
+from .logic.method import describe
 from .method import Method
 from .project import Project
+from .results import Results
 from .sample import Sample
 
 
@@ -30,6 +32,7 @@ class PyBackend(QObject):
             settings=self._method.run_settings,
             parent=self,
         )
+        self._results = Results(parent=self)
         self._connect_parts()
 
     @Property('QVariant', constant=True)
@@ -52,6 +55,10 @@ class PyBackend(QObject):
     def job(self) -> Job:
         return self._job
 
+    @Property('QVariant', constant=True)
+    def results(self) -> Results:
+        return self._results
+
     # Relays between parts. The project summarises the other parts; the setters it offers
     # go through its change tracking, so a created project is saved or flagged like any edit.
 
@@ -62,6 +69,7 @@ class PyBackend(QObject):
         self._project.createdChanged.connect(self._relay_project_folder)
         self._project.locationChanged.connect(self._relay_project_folder)
         self._job.stateChanged.connect(self._relay_job_state)
+        self._job.stateChanged.connect(self._relay_results)
         # The parts hold their initial state before any signal fires.
         self._relay_sample()
         self._relay_calculations()
@@ -86,3 +94,11 @@ class PyBackend(QObject):
         # JobState and ProjectStatus share their values, except the idle state of a new job.
         if self._job.state != 'idle':
             self._project.setStatus(self._job.state)
+
+    def _relay_results(self) -> None:
+        # A starting job invalidates the shown results; an ended one, even failed or stopped,
+        # shows whatever its output holds.
+        if self._job.state == 'running':
+            self._results.clear(describe(self._method.logic, self._method.adapter.capabilities()))
+        elif self._job.state != 'idle':
+            self._results.set_results(self._method.adapter.parse(self._job.output))

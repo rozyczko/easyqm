@@ -81,15 +81,7 @@ class Sample:
         return sum(atom.fixed for atom in self.atoms)
 
     def bonds(self) -> list[tuple[int, int]]:
-        """Atom index pairs closer than the scaled sum of their covalent radii."""
-        pairs = []
-        for i, first in enumerate(self.atoms):
-            for j in range(i + 1, len(self.atoms)):
-                second = self.atoms[j]
-                cutoff = _BOND_TOLERANCE * (_radius(first.element) + _radius(second.element))
-                if _distance(first, second) < cutoff:
-                    pairs.append((i, j))
-        return pairs
+        return find_bonds(self.atoms)
 
     # Input
 
@@ -118,6 +110,18 @@ class Sample:
         self.atoms = atoms
         self.source = path.name
         self.name = path.stem
+
+
+def find_bonds(atoms: list[Atom]) -> list[tuple[int, int]]:
+    """Atom index pairs closer than the scaled sum of their covalent radii."""
+    pairs = []
+    for i, first in enumerate(atoms):
+        for j in range(i + 1, len(atoms)):
+            second = atoms[j]
+            cutoff = _BOND_TOLERANCE * (_radius(first.element) + _radius(second.element))
+            if _distance(first, second) < cutoff:
+                pairs.append((i, j))
+    return pairs
 
 
 def _radius(element: str) -> float:

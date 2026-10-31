@@ -6,3 +6,5 @@ ChoiceComboBox ChoiceComboBox.qml
 EngineCard EngineCard.qml
 AtomStyle 1.0 AtomStyle.js
 LogView LogView.qml
+StatTile StatTile.qml
+StickSpectrum StickSpectrum.qml

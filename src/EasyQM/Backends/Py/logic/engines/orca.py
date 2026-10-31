@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 EasyQM contributors
 # SPDX-License-Identifier: BSD-3-Clause
-"""ORCA adapter: detection, the choices ORCA offers, input generation and the success check.
+"""ORCA adapter: detection, the choices ORCA offers, input generation, success check and results.
 
 The whole workflow goes into one input file, so one ORCA process writes one output file:
 optimisation and frequencies are keywords of the same job (ORCA runs the frequencies at the
@@ -18,7 +18,9 @@ from typing import Optional
 
 from ..calculations import CalculationType
 from ..calculations import info
+from ..results import Results
 from ..runner import NO_WINDOW
+from . import orca_output
 from .base import Capabilities
 from .base import EngineAdapter
 from .base import EngineInfo
@@ -129,6 +131,9 @@ class OrcaAdapter(EngineAdapter):
 
     def succeeded(self, output: str) -> bool:
         return NORMAL_TERMINATION in output
+
+    def parse(self, output: str) -> Results:
+        return orca_output.parse(output)
 
 
 def _method_keywords(method) -> list[str]:

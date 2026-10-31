@@ -6,7 +6,7 @@ EasyReflectometryApp.
 ## Folder root
 
 The modules in the root define the API of the backend, one class per GUI page (`Project`,
-`Sample`, `Calculations`, `Method`; `Summary` later). They are `QObject`s exposing
+`Sample`, `Calculations`, `Method`, and `Results` for the Summary page). They are `QObject`s exposing
 `Property`/`Slot`/`Signal` and hold no logic of their own: every method delegates to a class
 in `logic/`. `helpers.py` holds the helpers the proxies share (`apply` for change-only
 setters, `choices` for combo-box models, `to_local_path` for file dialog URLs). `job.py` is
@@ -22,6 +22,7 @@ between them:
 | `method.engineChanged` | `job.set_executable` | the detected executable, or none |
 | `project.createdChanged`, `project.locationChanged` | `job.set_root_folder` | runs go into `<project>/runs/` once the project exists |
 | `job.stateChanged` | `project.setStatus` | running, completed, failed, stopped |
+| `job.stateChanged` | `results.clear` / `results.set_results` | Summary results: cleared when a job starts, parsed from the output when it ends |
 
 The GUI reaches the backend only through `Gui/Globals/BackendWrapper.qml`.
 
@@ -35,6 +36,10 @@ extracted into a Qt-free library package.
 adapter knows how to detect its executable, which choices it offers to the Method page
 (`Capabilities`), how to write the input for a workflow, the command line, and how to tell
 from the output whether the job succeeded.
+
+`logic/results.py` is the engine-agnostic results schema that an adapter's `parse()` fills
+(`engines/orca_output.py` for ORCA); `results.py` in the folder root formats it for the
+Summary page.
 
 `logic/runner.py` is the only code that starts a process: numbered run folders, the engine
 run as a subprocess with its output written to a file, incremental reading of that file,

@@ -158,6 +158,19 @@ QtObject {
     function jobRun() { activeBackend.job.run() }
     function jobStop() { activeBackend.job.stop() }
 
+    ///////////////////////////////////
+    // Summary page: results of the job
+    ///////////////////////////////////
+    readonly property bool resultsAvailable: activeBackend.results.available
+    readonly property string resultsPlaceholder: activeBackend.results.placeholder
+    readonly property var resultsTiles: activeBackend.results.tiles
+    readonly property bool resultsHasOptimisation: activeBackend.results.hasOptimisation
+    readonly property var resultsGeometryRows: activeBackend.results.geometryRows
+    readonly property var resultsConvergenceRows: activeBackend.results.convergenceRows
+    readonly property bool resultsHasFrequencies: activeBackend.results.hasFrequencies
+    readonly property bool resultsHasRaman: activeBackend.results.hasRaman
+    readonly property var resultsModes: activeBackend.results.modes
+
     // Signals forwarded from the backend
     signal projectSaved(string path)
     signal projectSaveError(string message)

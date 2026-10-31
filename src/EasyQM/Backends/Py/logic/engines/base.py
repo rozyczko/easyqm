@@ -4,8 +4,9 @@
 
 GENERAL_DESIGN.md, section 4, rule 1. An adapter detects its executable, lists the choices
 it offers, turns the sample, calculations and method into an input file, builds the command
-line, and judges from the output whether the job succeeded. Launching the process is the
-runner's job (`logic/runner.py`), so all engines look the same to it.
+line, judges from the output whether the job succeeded, and reads the results from it.
+Launching the process is the runner's job (`logic/runner.py`), so all engines look the same
+to it.
 """
 
 from abc import ABC
@@ -68,3 +69,7 @@ class EngineAdapter(ABC):
     def succeeded(self, output: str) -> bool:
         """Whether the output shows a normal end of the job."""
         raise NotImplementedError(f'{self.name}: output checking is not implemented.')
+
+    def parse(self, output: str):
+        """The results found in the output, as a `logic.results.Results`."""
+        raise NotImplementedError(f'{self.name}: output parsing is not implemented.')

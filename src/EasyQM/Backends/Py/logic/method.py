@@ -28,3 +28,14 @@ class Method:
 class RunSettings:
     cores: int = 1  # serial runs only in PoC1
     memory_gb: int = 16
+
+
+def describe(method: Method, capabilities) -> str:
+    """Short level-of-theory label with display names, e.g. 'B3LYP-D3(BJ)/def2-TZVP'."""
+    if method.family == 'HF':
+        theory = 'HF'
+    else:
+        theory = dict(capabilities.functionals).get(method.functional, method.functional)
+        if method.dispersion != 'none':
+            theory += '-' + dict(capabilities.dispersions).get(method.dispersion, method.dispersion)
+    return f'{theory}/{method.basis_set}'
