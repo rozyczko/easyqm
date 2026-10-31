@@ -17,9 +17,23 @@ Column {
         id: atomsTable
 
         defaultInfoText: qsTr('No structure loaded')
+        // EasyApp delays presses by 10 ms, and the replayed press never reaches the rows'
+        // TapHandler, so row clicks would be lost.
+        pressDelay: 0
         // Row count only: the delegates read the current atom by index, so a change of one
         // atom does not rebuild the table.
         model: Globals.BackendWrapper.sampleAtoms.length
+
+        // Bring an atom picked in the viewer into view.
+        Connections {
+            target: Globals.BackendWrapper
+            function onSampleSelectedAtomsChanged() {
+                const selected = Globals.BackendWrapper.sampleSelectedAtoms
+                if (selected.length > 0) {
+                    atomsTable.positionViewAtIndex(selected[selected.length - 1], ListView.Contain)
+                }
+            }
+        }
 
         header: EaComponents.TableViewHeader {
             EaComponents.TableViewLabel {
@@ -60,6 +74,23 @@ Column {
 
         delegate: EaComponents.TableViewDelegate {
             readonly property var atom: Globals.BackendWrapper.sampleAtoms[index]
+            readonly property bool selected: Globals.BackendWrapper.sampleSelectedAtoms.includes(index)
+
+            color: selected ?
+                       EaStyle.Colors.themeRowHighlightHovered :
+                       index % 2 ? EaStyle.Colors.themeBackgroundHovered2 : EaStyle.Colors.themeBackgroundHovered1
+
+            // Click selects the atom, Ctrl-click adds it or takes it out, Shift-click selects
+            // the rows from the last clicked one to this one.
+            TapHandler {
+                id: rowTap
+                onTapped: {
+                    const modifiers = rowTap.point.modifiers
+                    const mode = modifiers & Qt.ShiftModifier ? 'range' :
+                                 modifiers & Qt.ControlModifier ? 'toggle' : 'only'
+                    Globals.BackendWrapper.sampleSelectAtom(index, mode)
+                }
+            }
 
             EaComponents.TableViewLabel {
                 width: EaStyle.Sizes.fontPixelSize * 2.5

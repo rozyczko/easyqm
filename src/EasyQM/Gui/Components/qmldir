@@ -8,3 +8,4 @@ AtomStyle 1.0 AtomStyle.js
 LogView LogView.qml
 StatTile StatTile.qml
 StickSpectrum StickSpectrum.qml
+MessageDialog MessageDialog.qml

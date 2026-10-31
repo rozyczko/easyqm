@@ -11,8 +11,9 @@ import Gui.Globals as Globals
 
 // TEMPORARY 2D structure viewer (PoC1).
 // Draws the sample on a Canvas: orthographic projection, drag to rotate, wheel to zoom, atoms
-// painted back to front. To be replaced by a QtQuick3D viewer reading the same
-// `sampleAtoms` / `sampleBonds` properties; nothing outside this file depends on the Canvas.
+// painted back to front, click to select. To be replaced by a QtQuick3D viewer reading the
+// same `sampleAtoms` / `sampleBonds` / `sampleSelectedAtoms` properties; nothing outside this
+// file depends on the Canvas.
 Rectangle {
     id: view
 
@@ -24,12 +25,20 @@ Rectangle {
     property real zoom: 1.0
     property string style: 'ballstick'  // 'ballstick' | 'wireframe' | 'spacefill'
     property bool showLabels: true
+    property bool selectMode: true  // clicks pick atoms; off, they only rotate
 
     readonly property var atoms: Globals.BackendWrapper.sampleAtoms
     readonly property var bonds: Globals.BackendWrapper.sampleBonds
+    readonly property var selected: Globals.BackendWrapper.sampleSelectedAtoms
+    readonly property string source: Globals.BackendWrapper.sampleSummary
+
+    // Screen discs of the last paint, nearest first, for picking: [{index, sx, sy, radius}]
+    property var discs: []
 
     onAtomsChanged: canvas.requestPaint()
     onBondsChanged: canvas.requestPaint()
+    onSelectedChanged: canvas.requestPaint()
+    onSourceChanged: resetView()
     onYawChanged: canvas.requestPaint()
     onPitchChanged: canvas.requestPaint()
     onZoomChanged: canvas.requestPaint()
@@ -40,6 +49,17 @@ Rectangle {
         yaw = 0.0
         pitch = 0.0
         zoom = 1.0
+    }
+
+    // Index of the atom drawn at (x, y), the nearest one where discs overlap; -1 for none.
+    function atomAt(x, y) {
+        const minimumRadius = EaStyle.Sizes.fontPixelSize * 0.5
+        for (const disc of discs) {
+            if (Math.hypot(x - disc.sx, y - disc.sy) <= Math.max(disc.radius, minimumRadius)) {
+                return disc.index
+            }
+        }
+        return -1
     }
 
     // Rotate about y (yaw) then x (pitch); returns [x, y, depth] in Å about the molecule centre.
@@ -65,6 +85,7 @@ Rectangle {
             ctx.reset()
             ctx.clearRect(0, 0, width, height)
             if (!view.atoms || view.atoms.length === 0) {
+                view.discs = []
                 return
             }
 
@@ -115,6 +136,13 @@ Rectangle {
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             for (const p of projected) {
+                if (view.selected.includes(p.index)) {
+                    ctx.beginPath()
+                    ctx.arc(p.sx, p.sy, p.radius + 4, 0, 2 * Math.PI)
+                    ctx.lineWidth = 4
+                    ctx.strokeStyle = EaStyle.Colors.themeAccent
+                    ctx.stroke()
+                }
                 ctx.beginPath()
                 ctx.arc(p.sx, p.sy, p.radius, 0, 2 * Math.PI)
                 ctx.fillStyle = Components.AtomStyle.color(p.atom.element)
@@ -127,6 +155,7 @@ Rectangle {
                     ctx.fillText(p.atom.label, p.sx, p.sy)
                 }
             }
+            view.discs = projected.reverse()
         }
 
         function ballRadius(element) {
@@ -138,15 +167,31 @@ Rectangle {
         }
     }
 
-    // Rotate by dragging, zoom with the wheel
+    // Rotate by dragging, zoom with the wheel; in select mode a click (no drag) picks an atom:
+    // alone it replaces the selection, with Ctrl or Shift it is added or taken out; a click on
+    // the background clears the selection.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
 
         property real lastX: 0
         property real lastY: 0
+        property real pressX: 0
+        property real pressY: 0
 
-        onPressed: (mouse) => { lastX = mouse.x; lastY = mouse.y }
+        onPressed: (mouse) => { lastX = pressX = mouse.x; lastY = pressY = mouse.y }
+        onReleased: (mouse) => {
+            if (!view.selectMode || Math.hypot(mouse.x - pressX, mouse.y - pressY) > 4) {
+                return
+            }
+            const index = view.atomAt(mouse.x, mouse.y)
+            const extend = (mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) !== 0
+            if (index >= 0) {
+                Globals.BackendWrapper.sampleSelectAtom(index, extend ? 'toggle' : 'only')
+            } else if (!extend) {
+                Globals.BackendWrapper.sampleClearSelection()
+            }
+        }
         onPositionChanged: (mouse) => {
             if (!pressed) {
                 return
@@ -210,8 +255,10 @@ Rectangle {
         Row {
             EaElements.ToolButton {
                 fontIcon: 'arrows-alt'
-                enabled: false
-                ToolTip.text: qsTr('Select atoms (not available yet)')
+                checkable: true
+                checked: view.selectMode
+                ToolTip.text: qsTr('Select atoms')
+                onClicked: view.selectMode = !view.selectMode
             }
             EaElements.ToolButton {
                 fontIcon: 'expand'
@@ -220,18 +267,33 @@ Rectangle {
             }
             EaElements.ToolButton {
                 fontIcon: 'backspace'
-                enabled: false
-                ToolTip.text: qsTr('Clear selection (not available yet)')
+                enabled: view.selected.length > 0
+                ToolTip.text: qsTr('Clear selection')
+                onClicked: Globals.BackendWrapper.sampleClearSelection()
             }
         }
     }
 
-    // Hint line
+    // Selection readout and hint line
+    EaElements.Label {
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.margins: EaStyle.Sizes.fontPixelSize * 1.5
+        textFormat: Text.StyledText
+        text: Globals.BackendWrapper.sampleSelectionMeasurement === '' ?
+                  qsTr('Selected: <b>%1</b>').arg(Globals.BackendWrapper.sampleSelectionText) :
+                  qsTr('Selected: <b>%1</b> – %2').arg(Globals.BackendWrapper.sampleSelectionText)
+                                                  .arg(Globals.BackendWrapper.sampleSelectionMeasurement)
+        visible: view.selected.length > 0
+    }
+
     EaElements.Label {
         anchors.bottom: parent.bottom
         anchors.right: parent.right
         anchors.margins: EaStyle.Sizes.fontPixelSize * 1.5
         color: EaStyle.Colors.themeForegroundMinor
-        text: qsTr('Rotate: drag · Zoom: wheel')
+        text: view.selectMode ?
+                  qsTr('Select: click · Add: Ctrl+click · Rotate: drag · Zoom: wheel') :
+                  qsTr('Rotate: drag · Zoom: wheel')
     }
 }

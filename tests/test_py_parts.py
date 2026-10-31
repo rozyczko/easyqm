@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QSettings
+from PySide6.QtCore import QUrl
 
 from Backends.Py.calculations import Calculations
 from Backends.Py.job import Job
@@ -85,6 +86,135 @@ def test_sample_fix_flag(qcore_application):
 
     assert len(changes) == 1
     assert sample.atoms[3]['fixed'] and sample.fixedCount == 1
+
+
+def test_sample_fix_applies_to_the_selection(qcore_application):
+    sample = Sample()
+    sample.selectAtom(0, 'only')
+    sample.selectAtom(2, 'range')
+    changes = _emissions(sample.atomsChanged)
+
+    sample.setAtomFixed(1, True)  # a selected row: all three
+    assert [atom['fixed'] for atom in sample.atoms[:4]] == [True, True, True, False]
+
+    sample.setAtomFixed(3, True)  # an unselected row: that one only
+    sample.setAtomFixed(0, False)
+    assert [atom['fixed'] for atom in sample.atoms[:4]] == [False, False, False, True]
+    assert len(changes) == 3
+
+
+def test_sample_selection(qcore_application):
+    sample = Sample()
+    changes = _emissions(sample.selectionChanged)
+
+    sample.selectAtom(0, 'only')
+    sample.selectAtom(0, 'only')  # unchanged, no signal
+    sample.selectAtom(6, 'toggle')
+    assert sample.selectedAtoms == [0, 6] and sample.selectionText == 'C1, H7'
+
+    sample.selectAtom(0, 'toggle')  # taken out
+    assert sample.selectedAtoms == [6]
+
+    sample.selectAtom(2, 'only')  # replaces
+    assert sample.selectedAtoms == [2]
+
+    sample.clearSelection()
+    sample.clearSelection()
+    assert sample.selectedAtoms == [] and sample.selectionText == ''
+    assert len(changes) == 5
+
+
+def test_sample_selection_measurement(qcore_application):
+    sample = Sample()
+    measurements = []
+    for picks in ([0], [0, 1], [0, 1, 2], [6, 0, 1, 7], [0, 1, 2, 3], [6, 0, 5, 11], [0, 1, 2, 3, 4]):
+        sample.clearSelection()
+        for index in picks:
+            sample.selectAtom(index, 'toggle')
+        measurements.append(sample.selectionMeasurement)
+
+    assert measurements == [
+        '',
+        'distance = 1.3915\u00a0Å',  # C1-C2
+        'angle = 120.00°',  # C1-C2-C3, at C2
+        'dihedral = 0.00°',  # H7-C1-C2-H8, cis in the ring plane
+        'dihedral = 0.00°',
+        'dihedral = 0.00°',
+        '',  # five atoms
+    ]
+
+    sample.clearSelection()
+    for index in (0, 1, 0):  # C1 picked twice is taken out again: C2 only
+        sample.selectAtom(index, 'toggle')
+    assert sample.selectionMeasurement == ''
+
+
+def test_sample_measurement_sign_and_undefined(qcore_application, tmp_path):
+    xyz = tmp_path / 'four.xyz'
+    xyz.write_text('5\n\nC 1 0 0\nC 0 0 0\nC 0 0 1\nC 0 -1 1\nC 0 0 -1\n', encoding='utf-8')
+    sample = Sample()
+    sample.loadXyz(str(xyz))
+
+    sample.selectAtom(0, 'only')
+    sample.selectAtom(3, 'range')
+    assert sample.selectionMeasurement == 'dihedral = \u221290.00°'
+
+    sample.selectAtom(4, 'only')  # 5, 2, 3, 4 with 2 and 3 on a line with 5
+    for index in (1, 2, 3):
+        sample.selectAtom(index, 'toggle')
+    assert sample.selectionMeasurement == 'dihedral undefined'
+
+
+def test_sample_range_selection(qcore_application):
+    sample = Sample()
+
+    sample.selectAtom(3, 'range')  # no anchor yet: this atom alone
+    assert sample.selectedAtoms == [3]
+
+    sample.selectAtom(2, 'only')
+    sample.selectAtom(6, 'range')
+    assert sample.selectedAtoms == [2, 3, 4, 5, 6] and sample.selectionText == '5 atoms'
+
+    sample.selectAtom(0, 'range')  # from the same anchor, the other way, replacing
+    assert sample.selectedAtoms == [2, 1, 0]
+
+    sample.selectAtom(9, 'toggle')  # Ctrl-click moves the anchor
+    sample.selectAtom(11, 'range')
+    assert sample.selectedAtoms == [9, 10, 11]
+
+    sample.clearSelection()  # and clearing forgets it
+    sample.selectAtom(4, 'range')
+    assert sample.selectedAtoms == [4]
+
+
+def test_sample_loads_xyz_and_clears_the_selection(qcore_application, tmp_path):
+    water = tmp_path / 'water.xyz'
+    water.write_text('3\nwater\nO 0 0 0.117\nH 0 0.757 -0.468\nH 0 -0.757 -0.468\n', encoding='utf-8')
+    sample = Sample()
+    sample.selectAtom(11, 'only')
+    changes = [_emissions(signal) for signal in (sample.sampleChanged, sample.atomsChanged, sample.selectionChanged)]
+    external = _emissions(sample.externalSampleChanged)
+
+    sample.loadXyz(QUrl.fromLocalFile(str(water)).toString())  # as the file dialog hands it over
+
+    assert sample.summary == 'water.xyz · H2O · 3 atoms'
+    assert sample.bonds == [[0, 1], [0, 2]]
+    assert sample.selectedAtoms == []
+    assert [len(calls) for calls in changes] == [1, 1, 1] and len(external) == 1
+
+
+def test_sample_load_error_keeps_the_structure(qcore_application, tmp_path):
+    sample = Sample()
+    sample.selectAtom(1, 'only')
+    errors = _emissions(sample.loadError)
+
+    sample.loadXyz(str(tmp_path / 'missing.xyz'))
+    (tmp_path / 'bad.xyz').write_text('1\n\nQ 0 0 0\n', encoding='utf-8')
+    sample.loadXyz(str(tmp_path / 'bad.xyz'))
+
+    assert sample.formula == 'C6H6' and sample.selectedAtoms == [1]
+    assert 'missing.xyz" could not be read' in errors[0][0] and 'No such file' in errors[0][0]
+    assert errors[1][0].endswith('Atom 1: "Q" is not an element.')
 
 
 # Calculations
@@ -280,6 +410,16 @@ def test_backend_fills_project_summary(backend):
 
     backend.calculations.setSelected('vibrational_frequencies', True)
     assert backend.project.calculations == ['Vibrational frequencies']
+
+
+def test_backend_relays_a_loaded_structure(backend, tmp_path):
+    water = tmp_path / 'water.xyz'
+    water.write_text('3\n\nO 0 0 0\nH 0 0.76 -0.47\nH 0 -0.76 -0.47\n', encoding='utf-8')
+
+    backend.sample.loadXyz(str(water))
+
+    assert backend.project.sampleName == 'H2O, 3 atoms'
+    assert backend.job._sample is backend.sample.logic  # the next run uses the loaded structure
 
 
 def test_backend_relay_is_saved_with_the_project(backend, tmp_path):

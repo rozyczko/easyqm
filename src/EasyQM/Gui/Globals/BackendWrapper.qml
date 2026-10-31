@@ -56,7 +56,17 @@ QtObject {
     readonly property var sampleAtoms: activeBackend.sample.atoms
     readonly property var sampleBonds: activeBackend.sample.bonds
     readonly property int sampleFixedCount: activeBackend.sample.fixedCount
+    // On a selected atom, fixes or frees every selected atom
     function sampleSetAtomFixed(index, value) { activeBackend.sample.setAtomFixed(index, value) }
+    function sampleLoadXyz(path) { activeBackend.sample.loadXyz(path) }
+    // Selected atom indices, shared by the viewer and the atom tables
+    readonly property var sampleSelectedAtoms: activeBackend.sample.selectedAtoms
+    readonly property string sampleSelectionText: activeBackend.sample.selectionText
+    // Distance, angle or dihedral of 2, 3 or 4 selected atoms
+    readonly property string sampleSelectionMeasurement: activeBackend.sample.selectionMeasurement
+    // mode: 'only' (click), 'toggle' (Ctrl-click), 'range' (Shift-click)
+    function sampleSelectAtom(index, mode) { activeBackend.sample.selectAtom(index, mode) }
+    function sampleClearSelection() { activeBackend.sample.clearSelection() }
 
     ////////////////////
     // Calculations page
@@ -175,12 +185,14 @@ QtObject {
     signal projectSaved(string path)
     signal projectSaveError(string message)
     signal projectLoadError(string message)
+    signal sampleLoadError(string message)
     signal jobOutputAppended(string text)
 
     Component.onCompleted: {
         activeBackend.project.projectSaved.connect(projectSaved)
         activeBackend.project.projectSaveError.connect(projectSaveError)
         activeBackend.project.projectLoadError.connect(projectLoadError)
+        activeBackend.sample.loadError.connect(sampleLoadError)
         activeBackend.job.outputAppended.connect(jobOutputAppended)
     }
 

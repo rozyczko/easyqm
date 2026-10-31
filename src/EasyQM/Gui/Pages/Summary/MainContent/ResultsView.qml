@@ -39,6 +39,9 @@ Rectangle {
     // EasyApp sizes a table's flexible column when its header is created, before the main
     // area has its final width.
     component WideTable: EaComponents.TableView {
+        // EasyApp delays presses by 10 ms, and the replayed press never reaches the rows'
+        // TapHandler, so row clicks would be lost.
+        pressDelay: 0
         onWidthChanged: {
             if (headerItem === null) {
                 return

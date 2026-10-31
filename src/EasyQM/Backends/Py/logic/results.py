@@ -6,11 +6,12 @@ An adapter's `parse()` fills a `Results` from the engine output. Every field is 
 what the output does not contain stays None, and the Summary page shows only what is there.
 """
 
-import math
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Optional
 
+from .geometry import angle
+from .geometry import distance
 from .sample import Atom
 from .sample import find_bonds
 
@@ -110,7 +111,11 @@ def bonds_and_angles(initial: list[Atom], final: list[Atom]) -> tuple[list[Bond]
     """Bond lengths and bond angles of the initial connectivity, in both geometries."""
     pairs = find_bonds(initial)
     bonds = [
-        Bond(f'{atom_label(initial, i)}–{atom_label(initial, j)}', _distance(initial, i, j), _distance(final, i, j))
+        Bond(
+            f'{atom_label(initial, i)}–{atom_label(initial, j)}',
+            distance(initial[i], initial[j]),
+            distance(final[i], final[j]),
+        )
         for i, j in pairs
     ]
     neighbours: dict[int, list[int]] = {}
@@ -127,18 +132,5 @@ def bonds_and_angles(initial: list[Atom], final: list[Atom]) -> tuple[list[Bond]
     return bonds, angles
 
 
-def _position(atoms: list[Atom], index: int) -> tuple[float, float, float]:
-    atom = atoms[index]
-    return atom.x, atom.y, atom.z
-
-
-def _distance(atoms: list[Atom], i: int, j: int) -> float:
-    return math.dist(_position(atoms, i), _position(atoms, j))
-
-
 def _angle(atoms: list[Atom], first: int, vertex: int, second: int) -> float:
-    centre = _position(atoms, vertex)
-    u = [a - c for a, c in zip(_position(atoms, first), centre)]
-    v = [b - c for b, c in zip(_position(atoms, second), centre)]
-    cosine = sum(a * b for a, b in zip(u, v)) / (math.hypot(*u) * math.hypot(*v))
-    return math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
+    return angle(atoms[first], atoms[vertex], atoms[second])  # bonded atoms never coincide

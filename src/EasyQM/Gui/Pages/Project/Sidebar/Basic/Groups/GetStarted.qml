@@ -6,6 +6,7 @@ import EasyApplication.Gui.Globals as EaGlobals
 import EasyApplication.Gui.Style as EaStyle
 import EasyApplication.Gui.Elements as EaElements
 
+import Gui.Components as Components
 import Gui.Globals as Globals
 
 
@@ -45,36 +46,11 @@ Column {
     }
 
     // Load and save failures reported by the backend
-    EaElements.Dialog {
-        id: projectErrorDialog
-        standardButtons: Dialog.Ok
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-        property string message: ''
-
-        // Fixed implicit size, so the wrapped label's size does not feed back into the dialog's.
-        Item {
-            implicitWidth: EaStyle.Sizes.sideBarContentWidth
-            implicitHeight: messageLabel.implicitHeight
-
-            EaElements.Label {
-                id: messageLabel
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: projectErrorDialog.message
-            }
-        }
-    }
+    Components.MessageDialog { id: projectErrorDialog }
 
     Connections {
         target: Globals.BackendWrapper
-        function onProjectLoadError(message) { showError(qsTr('Project could not be opened'), message) }
-        function onProjectSaveError(message) { showError(qsTr('Project could not be saved'), message) }
-    }
-
-    function showError(title, message) {
-        projectErrorDialog.title = title
-        projectErrorDialog.message = message
-        projectErrorDialog.open()
+        function onProjectLoadError(message) { projectErrorDialog.show(qsTr('Project could not be opened'), message) }
+        function onProjectSaveError(message) { projectErrorDialog.show(qsTr('Project could not be saved'), message) }
     }
 }

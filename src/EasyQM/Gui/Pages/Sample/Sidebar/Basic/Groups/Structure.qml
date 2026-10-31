@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Dialogs
 
 import EasyApplication.Gui.Style as EaStyle
 import EasyApplication.Gui.Elements as EaElements
@@ -14,8 +15,9 @@ Column {
         wide: true
         fontIcon: 'upload'
         text: qsTr('Load structure from file...')
-        // PoC1 ships with benzene only; file loading comes with the structure reader.
-        enabled: false
+        // A running job was set up for the current structure.
+        enabled: !Globals.BackendWrapper.jobRunning
+        onClicked: structureFileDialog.open()
     }
 
     Components.LabelledField {
@@ -41,5 +43,19 @@ Column {
             color: EaStyle.Colors.themeForegroundMinor
             text: Globals.BackendWrapper.samplePeriodic ? qsTr('crystal') : qsTr('molecule')
         }
+    }
+
+    FileDialog {
+        id: structureFileDialog
+        title: qsTr('Load a structure')
+        nameFilters: [qsTr('XYZ files (*.xyz)'), qsTr('All files (*)')]
+        onAccepted: Globals.BackendWrapper.sampleLoadXyz(selectedFile)
+    }
+
+    Components.MessageDialog { id: loadErrorDialog }
+
+    Connections {
+        target: Globals.BackendWrapper
+        function onSampleLoadError(message) { loadErrorDialog.show(qsTr('Structure could not be loaded'), message) }
     }
 }
