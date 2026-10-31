@@ -11,9 +11,10 @@ EaComponents.ContentPage {
     mainView: EaComponents.MainContent {
         tabs: [
             EaElements.TabButton { text: qsTr('Viewer') },
-            EaElements.TabButton { text: qsTr('Atoms') },
-            EaElements.TabButton { text: qsTr('Bonds') },
-            EaElements.TabButton { text: qsTr('Cell') }
+            // PoC1: the tables behind these tabs are not implemented yet.
+            EaElements.TabButton { text: qsTr('Atoms'); enabled: false },
+            EaElements.TabButton { text: qsTr('Bonds'); enabled: false },
+            EaElements.TabButton { text: qsTr('Cell'); enabled: false }
         ]
 
         items: [

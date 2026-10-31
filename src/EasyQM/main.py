@@ -7,7 +7,10 @@ import EasyApplication
 from EasyApplication.Logic.Logging import console
 from PySide6.QtCore import qInstallMessageHandler
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import qmlRegisterSingletonType
 from PySide6.QtWidgets import QApplication
+
+from Backends.Py import PyBackend
 
 CURRENT_DIR = Path(__file__).parent  # path to qml components of the current project
 # Path to the directory that *contains* the installed EasyApplication package, so that
@@ -18,6 +21,9 @@ EASYAPP_IMPORT_DIR = Path(EasyApplication.__path__[0]).parent
 if __name__ == '__main__':
     qInstallMessageHandler(console.qmlMessageHandler)
     console.debug('Custom Qt message handler defined')
+
+    qmlRegisterSingletonType(PyBackend, 'Backends', 1, 0, 'PyBackend')
+    console.debug('Backend class is registered to be accessible from QML via the name PyBackend')
 
     app = QApplication(sys.argv)
     console.debug(f'Qt Application created {app}')

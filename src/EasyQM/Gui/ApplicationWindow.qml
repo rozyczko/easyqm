@@ -20,12 +20,15 @@ EaComponents.ApplicationWindow {
         EaElements.ToolButton {
             highlighted: true
             fontIcon: 'save'
+            enabled: Globals.BackendWrapper.projectCreated && Globals.BackendWrapper.projectHasUnsavedChanges
             ToolTip.text: qsTr('Save current state of the project')
+            onClicked: Globals.BackendWrapper.projectSave()
         },
 
         EaElements.ToolButton {
             fontIcon: 'undo'
             ToolTip.text: qsTr('Reset to initial state without project, sample and calculations')
+            onClicked: Globals.BackendWrapper.projectReset()
         }
     ]
 

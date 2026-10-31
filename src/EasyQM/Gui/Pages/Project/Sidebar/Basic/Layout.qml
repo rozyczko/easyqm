@@ -17,14 +17,15 @@ EaComponents.SideBarColumn {
 
     EaElements.GroupBox {
         title: qsTr('Project details')
-        icon: 'info-circle'
+        icon: 'pencil-alt'
+        collapsed: false
 
         Loader { source: 'Groups/ProjectDetails.qml' }
     }
 
     EaElements.GroupBox {
         title: qsTr('Examples')
-        icon: 'folder-open'
+        icon: 'layer-group'
 
         Loader { source: 'Groups/Examples.qml' }
     }

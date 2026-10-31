@@ -5,61 +5,44 @@ import EasyApplication.Gui.Elements as EaElements
 import EasyApplication.Gui.Components as EaComponents
 
 
+// One group per calculation, in the order the workflow runs them.
 EaComponents.SideBarColumn {
 
     EaElements.GroupBox {
-        title: qsTr('Single point energy')
-        collapsed: false
-
-        Loader { source: 'Groups/SinglePointEnergy.qml' }
-    }
-
-    EaElements.GroupBox {
         title: qsTr('Geometry optimisation')
+        icon: 'level-down-alt'
+        collapsed: false
 
         Loader { source: 'Groups/GeometryOptimisation.qml' }
     }
 
     EaElements.GroupBox {
         title: qsTr('Vibrational frequencies')
+        icon: 'chart-bar'
 
         Loader { source: 'Groups/VibrationalFrequencies.qml' }
     }
 
     EaElements.GroupBox {
+        title: qsTr('Single point energy')
+        icon: 'dot-circle'
+
+        Loader { source: 'Groups/SinglePointEnergy.qml' }
+    }
+
+    // PoC1 placeholders: no controls behind these yet.
+    EaElements.GroupBox {
         title: qsTr('Excited states (TD-DFT)')
+        icon: 'cog'
 
         Loader { source: 'Groups/ExcitedStates.qml' }
     }
 
     EaElements.GroupBox {
         title: qsTr('Electronic properties')
+        icon: 'cog'
 
         Loader { source: 'Groups/ElectronicProperties.qml' }
-    }
-
-    EaElements.GroupBox {
-        title: qsTr('NMR shielding')
-
-        Loader { source: 'Groups/NmrShielding.qml' }
-    }
-
-    EaElements.GroupBox {
-        title: qsTr('Transition-state search')
-
-        Loader { source: 'Groups/TransitionStateSearch.qml' }
-    }
-
-    EaElements.GroupBox {
-        title: qsTr('Band structure / DOS')
-
-        Loader { source: 'Groups/BandStructure.qml' }
-    }
-
-    EaElements.GroupBox {
-        title: qsTr('Phonons')
-
-        Loader { source: 'Groups/Phonons.qml' }
     }
 
 }
