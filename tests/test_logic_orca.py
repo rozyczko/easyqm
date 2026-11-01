@@ -11,6 +11,8 @@ from Backends.Py.logic.engines import orca
 from Backends.Py.logic.engines.orca import OrcaAdapter
 from Backends.Py.logic.method import Method
 from Backends.Py.logic.method import RunSettings
+from Backends.Py.logic.method import kpoint_grid
+from Backends.Py.logic.sample import Cell
 from Backends.Py.logic.sample import Sample
 
 
@@ -84,7 +86,25 @@ def test_method_defaults_are_orca_choices():
     }
     for name, choices in pairs.items():
         assert getattr(method, name) in [value for value, _ in choices], name
-    assert {field.name for field in fields(Method)} - set(pairs) == {'scf_max_iterations', 'stability_check'}
+    assert {field.name for field in fields(Method)} - set(pairs) == {'scf_max_iterations', 'stability_check', 'kpoints'}
+
+
+def test_kpoint_grid_from_spacing():
+    # CASTEP's convention, without 2π: |a*| = 1/5.64 Å⁻¹ for cubic NaCl.
+    assert kpoint_grid(Cell.from_parameters(5.64, 5.64, 5.64, 90, 90, 90), 0.1) == (2, 2, 2)
+    assert kpoint_grid(Cell.from_parameters(5.64, 5.64, 5.64, 90, 90, 90), 0.05) == (4, 4, 4)
+    assert kpoint_grid(Cell.from_parameters(2.464, 2.464, 6.711, 90, 90, 120), 0.1) == (5, 5, 2)
+    assert kpoint_grid(Cell.from_parameters(100, 100, 100, 90, 90, 90), 0.1) == (1, 1, 1)
+
+
+def test_orca_refuses_a_crystal(nacl_cif):
+    sample = Sample()
+    sample.load(nacl_cif)
+    calculations = Calculations()
+    calculations.set_selected(CalculationType.SINGLE_POINT, True)
+
+    with pytest.raises(ValueError, match='ORCA runs molecules only; this sample is periodic.'):
+        OrcaAdapter().input_text(sample, calculations, Method(), RunSettings())
 
 
 # Input generation

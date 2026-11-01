@@ -48,8 +48,9 @@ Column {
     FileDialog {
         id: structureFileDialog
         title: qsTr('Load a structure')
-        nameFilters: [qsTr('XYZ files (*.xyz)'), qsTr('All files (*)')]
-        onAccepted: Globals.BackendWrapper.sampleLoadXyz(selectedFile)
+        nameFilters: [qsTr('Structure files (*.cif *.xyz)'), qsTr('CIF files (*.cif)'), qsTr('XYZ files (*.xyz)'),
+                      qsTr('All files (*)')]
+        onAccepted: Globals.BackendWrapper.sampleLoadStructure(selectedFile)
     }
 
     Components.MessageDialog { id: loadErrorDialog }

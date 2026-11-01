@@ -5,6 +5,8 @@
 import math
 from typing import Optional
 
+Vec = tuple[float, float, float]
+
 _TINY = 1e-8  # a vector shorter than this has no direction
 
 
@@ -15,10 +17,10 @@ def distance(first, second) -> float:
 def angle(first, vertex, second) -> Optional[float]:
     """Angle first–vertex–second in degrees; None when an atom sits on the vertex."""
     u, v = _vector(vertex, first), _vector(vertex, second)
-    lengths = _norm(u) * _norm(v)
+    lengths = norm(u) * norm(v)
     if lengths < _TINY:
         return None
-    return math.degrees(math.acos(max(-1.0, min(1.0, _dot(u, v) / lengths))))
+    return math.degrees(math.acos(max(-1.0, min(1.0, dot(u, v) / lengths))))
 
 
 def dihedral(first, second, third, fourth) -> Optional[float]:
@@ -27,10 +29,10 @@ def dihedral(first, second, third, fourth) -> Optional[float]:
     None when three of the atoms are on a line, so a plane is not defined.
     """
     b1, b2, b3 = _vector(first, second), _vector(second, third), _vector(third, fourth)
-    n1, n2 = _cross(b1, b2), _cross(b2, b3)
-    if _norm(n1) < _TINY or _norm(n2) < _TINY:
+    n1, n2 = cross(b1, b2), cross(b2, b3)
+    if norm(n1) < _TINY or norm(n2) < _TINY:
         return None
-    return math.degrees(math.atan2(_norm(b2) * _dot(b1, n2), _dot(n1, n2)))
+    return math.degrees(math.atan2(norm(b2) * dot(b1, n2), dot(n1, n2)))
 
 
 def measure(atoms: list) -> Optional[tuple[str, Optional[float]]]:
@@ -45,21 +47,24 @@ def measure(atoms: list) -> Optional[tuple[str, Optional[float]]]:
     return None
 
 
-def _position(atom) -> tuple[float, float, float]:
+def _position(atom) -> Vec:
     return atom.x, atom.y, atom.z
 
 
-def _vector(start, end) -> tuple[float, float, float]:
+def _vector(start, end) -> Vec:
     return tuple(b - a for a, b in zip(_position(start), _position(end)))
 
 
-def _dot(u, v) -> float:
+# Vector arithmetic, also used by the unit cell and the scene
+
+
+def dot(u, v) -> float:
     return sum(a * b for a, b in zip(u, v))
 
 
-def _cross(u, v) -> tuple[float, float, float]:
+def cross(u, v) -> Vec:
     return (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
 
 
-def _norm(u) -> float:
+def norm(u) -> float:
     return math.hypot(*u)

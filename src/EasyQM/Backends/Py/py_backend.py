@@ -78,6 +78,7 @@ class PyBackend(QObject):
 
     def _relay_sample(self) -> None:
         self._project.setSampleName(f'{self._sample.formula}, {self._sample.atomCount} atoms')
+        self._method.set_sample_cell(self._sample.logic.cell)
 
     def _relay_calculations(self) -> None:
         self._project.setCalculations(self._calculations.selectedNames)

@@ -1,26 +1,37 @@
 # SPDX-FileCopyrightText: 2026 EasyQM contributors
 # SPDX-License-Identifier: BSD-3-Clause
-"""Qt-free sample state: the molecule the calculations are run on (GENERAL_DESIGN.md, 3.2).
+"""Qt-free sample state: the molecule or crystal the calculations are run on (GENERAL_DESIGN.md, 3.2).
 
-Structures are read from XYZ files by `read_xyz`. Other formats (through ASE) can be added
-next to it; `Sample` itself does not change.
+Structures are read from XYZ files (with a cell when extended XYZ gives one) by `read_xyz`
+and from CIF files by `read_cif`. A crystal holds the full content of its unit cell (P1):
+symmetry is expanded on reading, and the atoms are wrapped into the cell.
 """
 
+import math
 import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 from typing import Union
 
 from .elements import COVALENT_RADII
 from .elements import DEFAULT_COVALENT_RADIUS
 from .elements import SYMBOLS
 from .elements import atomic_number
+from .geometry import Vec
+from .geometry import cross
 from .geometry import distance
+from .geometry import dot
+from .geometry import norm
 
 STRUCTURES_DIR = Path(__file__).resolve().parents[3] / 'Resources' / 'structures'
 
 _BOND_TOLERANCE = 1.2
+_WRAP_TOLERANCE = 1e-6  # a fractional coordinate this close to 0 or 1 is 0
+_OCCUPANCY_TOLERANCE = 1e-3
+_LATTICE = re.compile(r'Lattice\s*=\s*"([^"]*)"', re.IGNORECASE)
+_PBC = re.compile(r'pbc\s*=\s*"([^"]*)"', re.IGNORECASE)
 
 
 @dataclass
@@ -33,6 +44,57 @@ class Atom:
     fixed: bool = False  # kept in place by the optimiser
 
 
+@dataclass
+class Cell:
+    """A unit cell: the three lattice vectors a, b, c in Å, Cartesian, as read."""
+
+    vectors: tuple[Vec, Vec, Vec]
+    space_group: str = ''  # short Hermann-Mauguin symbol, 'Fm-3m'; '' when unknown
+
+    @classmethod
+    def from_parameters(cls, a, b, c, alpha, beta, gamma, space_group: str = '') -> 'Cell':
+        """a along x, b in the xy plane: the setting gemmi uses for CIF coordinates."""
+        cos_alpha, cos_beta, cos_gamma = (math.cos(math.radians(angle)) for angle in (alpha, beta, gamma))
+        sin_gamma = math.sin(math.radians(gamma))
+        cx = c * cos_beta
+        cy = c * (cos_alpha - cos_beta * cos_gamma) / sin_gamma
+        cz = math.sqrt(max(0.0, c * c - cx * cx - cy * cy))
+        return cls(((a, 0.0, 0.0), (b * cos_gamma, b * sin_gamma, 0.0), (cx, cy, cz)), space_group)
+
+    @property
+    def lengths(self) -> Vec:
+        """a, b, c in Å."""
+        return tuple(norm(vector) for vector in self.vectors)
+
+    @property
+    def angles(self) -> Vec:
+        """alpha (b, c), beta (a, c), gamma (a, b) in degrees."""
+        a, b, c = self.vectors
+        return tuple(_angle_between(u, v) for u, v in ((b, c), (a, c), (a, b)))
+
+    @property
+    def volume(self) -> float:
+        a, b, c = self.vectors
+        return abs(dot(a, cross(b, c)))
+
+    @property
+    def reciprocal(self) -> tuple[Vec, Vec, Vec]:
+        """Reciprocal vectors in Å⁻¹, without the 2π factor: a*·a = 1, a*·b = 0."""
+        a, b, c = self.vectors
+        volume = dot(a, cross(b, c))
+        return tuple(tuple(x / volume for x in cross(u, v)) for u, v in ((b, c), (c, a), (a, b)))
+
+    def fractional(self, x: float, y: float, z: float) -> Vec:
+        return tuple(dot((x, y, z), vector) for vector in self.reciprocal)
+
+    def cartesian(self, fa: float, fb: float, fc: float) -> Vec:
+        return tuple(fa * a + fb * b + fc * c for a, b, c in zip(*self.vectors))
+
+
+def _angle_between(u: Vec, v: Vec) -> float:
+    return math.degrees(math.acos(max(-1.0, min(1.0, dot(u, v) / (norm(u) * norm(v))))))
+
+
 class Sample:
     def __init__(self):
         self.reset()
@@ -41,70 +103,99 @@ class Sample:
         self.name = ''
         self.source = ''  # file the atoms came from, e.g. 'benzene.xyz'
         self.atoms: list[Atom] = []
-        self.periodic = False
+        self.cell: Optional[Cell] = None  # None for a molecule
         self.charge = 0
         self.multiplicity = 1
 
     @classmethod
     def benzene(cls) -> 'Sample':
         sample = cls()
-        sample.load_xyz(STRUCTURES_DIR / 'benzene.xyz')
+        sample.load(STRUCTURES_DIR / 'benzene.xyz')
         return sample
 
     # Derived
+
+    @property
+    def periodic(self) -> bool:
+        return self.cell is not None
 
     @property
     def atom_count(self) -> int:
         return len(self.atoms)
 
     @property
+    def formula_units(self) -> int:
+        """Z: the formula units in the cell of a crystal (gcd of the element counts); 1 for a molecule."""
+        if not self.periodic or not self.atoms:
+            return 1
+        return math.gcd(*self._element_counts().values())
+
+    @property
     def formula(self) -> str:
-        """Hill order: C, then H, then the rest alphabetically; count omitted when 1."""
-        counts = Counter(atom.element for atom in self.atoms)
+        """Hill order: C, then H, then the rest alphabetically; count omitted when 1.
+
+        A crystal's formula is that of one formula unit: NaCl's cell of 8 atoms gives 'ClNa'.
+        """
+        counts = self._element_counts()
+        units = self.formula_units
         ordered = [element for element in ('C', 'H') if element in counts]
         ordered += sorted(element for element in counts if element not in ('C', 'H'))
-        return ''.join(f'{element}{counts[element] if counts[element] > 1 else ""}' for element in ordered)
+        return ''.join(f'{element}{counts[element] // units if counts[element] > units else ""}' for element in ordered)
 
     @property
     def summary(self) -> str:
-        return ' · '.join(part for part in (self.source, self.formula, f'{self.atom_count} atoms') if part)
+        """'benzene.xyz · C6H6 · 12 atoms'; 'NaCl.cif · ClNa · Z = 4 · 8 atoms · Fm-3m' for a crystal."""
+        parts = [self.source, self.formula]
+        if self.periodic:
+            parts.append(f'Z = {self.formula_units}')
+        parts.append(f'{self.atom_count} atoms')
+        if self.periodic:
+            parts.append(self.cell.space_group)
+        return ' · '.join(part for part in parts if part)
 
     @property
     def fixed_count(self) -> int:
         return sum(atom.fixed for atom in self.atoms)
 
-    def bonds(self) -> list[tuple[int, int]]:
-        return find_bonds(self.atoms)
+    def _element_counts(self) -> Counter:
+        return Counter(atom.element for atom in self.atoms)
 
     # Input
 
-    def load_xyz(self, path: Union[str, Path]) -> None:
-        """Replace the structure with the one in an XYZ file. On an error the sample is unchanged.
+    def load(self, path: Union[str, Path]) -> None:
+        """Replace the structure with the one in a CIF or XYZ file. On an error the sample is unchanged.
 
-        XYZ holds no charge or spin, so the charge goes back to 0 and the multiplicity to the
-        lowest one the electron count allows (singlet or doublet).
+        The files hold no charge or spin, so the charge goes back to 0 and the multiplicity to
+        the lowest one the electron count allows (singlet or doublet).
         """
         path = Path(path)
         try:
-            atoms = read_xyz(path.read_text(encoding='utf-8'))
+            text = path.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             raise ValueError('The file is not a text file.')
+        read = read_cif if path.suffix.lower() == '.cif' else read_xyz
+        atoms, cell = read(text)
+        if cell is not None:
+            _wrap(atoms, cell)
         self.atoms = atoms
+        self.cell = cell
         self.source = path.name
         self.name = path.stem
-        self.periodic = False
         self.charge = 0
         electrons = sum(atomic_number(atom.element) for atom in atoms)
         self.multiplicity = 1 + electrons % 2
 
 
-def read_xyz(text: str) -> list[Atom]:
-    """Atoms of the first frame of an XYZ file, Cartesian coordinates in Å.
+def read_xyz(text: str) -> tuple[list[Atom], Optional[Cell]]:
+    """Atoms of the first frame of an XYZ file, Cartesian coordinates in Å, and its cell.
 
     The format: the atom count, a comment line, then one `element x y z` line per atom.
     The element may also be an atomic number or a label starting with the symbol ('C12',
     'Cl_a'); columns after z (extended XYZ: forces, charges, ...) are ignored, and so are
     any further frames. Labels are numbered in file order: C1, H2, ...
+
+    The cell comes from an extended XYZ comment line, `Lattice="ax ay az bx by bz cx cy cz"`;
+    it is None without one, or when `pbc="F F F"` says the box is not periodic.
     """
     lines = text.splitlines()
     try:
@@ -128,7 +219,83 @@ def read_xyz(text: str) -> list[Atom]:
         except ValueError:
             raise ValueError(f'Atom {number}: expected "element x y z", got "{line.strip()}".')
         atoms.append(Atom(f'{element}{number}', element, x, y, z))
-    return atoms
+    return atoms, _xyz_cell(lines[1])
+
+
+def _xyz_cell(comment: str) -> Optional[Cell]:
+    lattice = _LATTICE.search(comment)
+    if lattice is None:
+        return None
+    pbc = _PBC.search(comment)
+    flags = {field.upper() in ('T', 'TRUE', '1') for field in pbc.group(1).split()} if pbc else set()
+    if flags == {False}:
+        return None  # a molecule in a box
+    if flags - {True}:
+        raise ValueError('Partially periodic structures are not supported.')
+    try:
+        numbers = [float(field) for field in lattice.group(1).split()]
+    except ValueError:
+        numbers = []
+    if len(numbers) != 9:
+        raise ValueError('Lattice= must hold nine numbers.')
+    cell = Cell((tuple(numbers[0:3]), tuple(numbers[3:6]), tuple(numbers[6:9])))
+    if cell.volume < 1e-6:
+        raise ValueError('The lattice vectors span no volume.')
+    return cell
+
+
+def read_cif(text: str) -> tuple[list[Atom], Cell]:
+    """Atoms of the whole unit cell, Cartesian in Å, and the cell, from the first data block
+    of a CIF file that has atoms.
+
+    gemmi expands the symmetry; the element comes from gemmi's reading of the type symbol
+    ('Na+' is Na). Labels are numbered in cell order, as for XYZ. Partially occupied sites
+    are refused: an engine cannot put two atoms on one position.
+    """
+    try:
+        import gemmi
+    except ImportError:
+        raise ValueError('Reading CIF needs the gemmi package.')
+    try:
+        document = gemmi.cif.read_string(text)
+    except ValueError as error:
+        raise ValueError(f'The file is not a CIF file: {error}')
+    structures = (gemmi.make_small_structure_from_block(block) for block in document)
+    structure = next((structure for structure in structures if structure.sites), None)
+    if structure is None:
+        raise ValueError('The file has no atoms.')
+    if not structure.cell.is_crystal():
+        raise ValueError('The file has no unit cell.')
+    for site in structure.sites:
+        if site.element.name not in SYMBOLS:  # gemmi reads an unknown type as 'X'
+            raise ValueError(f'Site {site.label}: "{site.type_symbol}" is not an element.')
+        if site.occ < 1 - _OCCUPANCY_TOLERANCE:
+            raise ValueError('The file has partially occupied sites.')
+    cell = Cell.from_parameters(*structure.cell.parameters, space_group=_space_group(gemmi, structure))
+    atoms = []
+    for number, site in enumerate(structure.get_all_unit_cell_sites(), start=1):
+        element = site.element.name
+        atoms.append(Atom(f'{element}{number}', element, *cell.cartesian(*site.fract.tolist())))
+    return atoms, cell
+
+
+def _space_group(gemmi, structure) -> str:
+    """'Fm-3m' from the Hermann-Mauguin symbol, else from the symmetry operations; '' if neither."""
+    if structure.spacegroup_hm:
+        group = gemmi.find_spacegroup_by_name(structure.spacegroup_hm)
+        return group.short_name() if group else structure.spacegroup_hm.replace(' ', '')
+    structure.determine_and_set_spacegroup('S')
+    return structure.spacegroup.short_name() if structure.spacegroup else ''
+
+
+def _wrap(atoms: list[Atom], cell: Cell) -> None:
+    """Move every atom into the cell: fractional coordinates in [0, 1)."""
+    for atom in atoms:
+        wrapped = []
+        for value in cell.fractional(atom.x, atom.y, atom.z):
+            value -= math.floor(value)
+            wrapped.append(0.0 if value < _WRAP_TOLERANCE or value > 1 - _WRAP_TOLERANCE else value)
+        atom.x, atom.y, atom.z = cell.cartesian(*wrapped)
 
 
 def _element(field: str) -> Union[str, None]:

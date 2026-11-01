@@ -29,4 +29,11 @@ EaComponents.SideBarColumn {
         Loader { source: 'Groups/Scf.qml' }
     }
 
+    EaElements.GroupBox {
+        title: qsTr('K-points')
+        icon: 'border-all'
+
+        Loader { source: 'Groups/KPoints.qml' }
+    }
+
 }

@@ -6,7 +6,29 @@
 (`engines.base.Capabilities`), so one `Method` can later be checked against several engines.
 """
 
+import math
 from dataclasses import dataclass
+from dataclasses import field
+from typing import Optional
+
+from .geometry import norm
+
+
+@dataclass
+class KPoints:
+    """Monkhorst-Pack sampling of a crystal: from a spacing, unless a grid is set by hand.
+
+    The spacing follows CASTEP's kpoint_mp_spacing: it is compared with reciprocal vectors
+    without the 2π factor, so 0.1 Å⁻¹ gives cubic NaCl (a = 5.64 Å) a 2 × 2 × 2 grid.
+    """
+
+    spacing: float = 0.1  # Å⁻¹
+    grid: Optional[tuple[int, int, int]] = None  # set by hand; None follows the spacing
+
+
+def kpoint_grid(cell, spacing: float) -> tuple[int, int, int]:
+    """The smallest grid whose points are at most `spacing` apart along each reciprocal vector."""
+    return tuple(max(1, math.ceil(norm(vector) / spacing - 1e-9)) for vector in cell.reciprocal)
 
 
 @dataclass
@@ -22,6 +44,7 @@ class Method:
     scf_max_iterations: int = 125
     integration_grid: str = 'DefGrid2'
     stability_check: bool = False
+    kpoints: KPoints = field(default_factory=KPoints)  # crystals only
 
 
 @dataclass

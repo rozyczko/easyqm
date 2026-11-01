@@ -94,6 +94,9 @@ class OrcaAdapter(EngineAdapter):
     # Input and output
 
     def input_text(self, sample, calculations, method, settings) -> str:
+        problem = self.system_problem(sample.periodic)
+        if problem:
+            raise ValueError(problem)
         steps = calculations.workflow()
         if not steps:
             raise ValueError('No calculation is selected.')

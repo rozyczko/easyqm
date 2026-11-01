@@ -73,8 +73,18 @@ def test_sample_starts_with_benzene(qcore_application):
     assert sample.formula == 'C6H6'
     assert sample.summary == 'benzene.xyz · C6H6 · 12 atoms'
     assert len(sample.atoms) == 12
-    assert sample.atoms[1] == {'label': 'C2', 'element': 'C', 'x': 1.2051, 'y': 0.6958, 'z': 0.0, 'fixed': False}
-    assert len(sample.bonds) == 12 and sample.bonds[0] == [0, 1]
+    assert sample.atoms[1] == {  # fractional 0 for a molecule
+        'label': 'C2',
+        'element': 'C',
+        'x': 1.2051,
+        'y': 0.6958,
+        'z': 0.0,
+        'fx': 0.0,
+        'fy': 0.0,
+        'fz': 0.0,
+        'fixed': False,
+    }
+    assert len(sample.sceneBonds) == 12 and sample.sceneBonds[0] == [0, 1]
 
 
 def test_sample_fix_flag(qcore_application):
@@ -153,7 +163,7 @@ def test_sample_measurement_sign_and_undefined(qcore_application, tmp_path):
     xyz = tmp_path / 'four.xyz'
     xyz.write_text('5\n\nC 1 0 0\nC 0 0 0\nC 0 0 1\nC 0 -1 1\nC 0 0 -1\n', encoding='utf-8')
     sample = Sample()
-    sample.loadXyz(str(xyz))
+    sample.loadStructure(str(xyz))
 
     sample.selectAtom(0, 'only')
     sample.selectAtom(3, 'range')
@@ -195,10 +205,10 @@ def test_sample_loads_xyz_and_clears_the_selection(qcore_application, tmp_path):
     changes = [_emissions(signal) for signal in (sample.sampleChanged, sample.atomsChanged, sample.selectionChanged)]
     external = _emissions(sample.externalSampleChanged)
 
-    sample.loadXyz(QUrl.fromLocalFile(str(water)).toString())  # as the file dialog hands it over
+    sample.loadStructure(QUrl.fromLocalFile(str(water)).toString())  # as the file dialog hands it over
 
     assert sample.summary == 'water.xyz · H2O · 3 atoms'
-    assert sample.bonds == [[0, 1], [0, 2]]
+    assert sample.sceneBonds == [[0, 1], [0, 2]]
     assert sample.selectedAtoms == []
     assert [len(calls) for calls in changes] == [1, 1, 1] and len(external) == 1
 
@@ -208,13 +218,94 @@ def test_sample_load_error_keeps_the_structure(qcore_application, tmp_path):
     sample.selectAtom(1, 'only')
     errors = _emissions(sample.loadError)
 
-    sample.loadXyz(str(tmp_path / 'missing.xyz'))
+    sample.loadStructure(str(tmp_path / 'missing.xyz'))
     (tmp_path / 'bad.xyz').write_text('1\n\nQ 0 0 0\n', encoding='utf-8')
-    sample.loadXyz(str(tmp_path / 'bad.xyz'))
+    sample.loadStructure(str(tmp_path / 'bad.xyz'))
 
     assert sample.formula == 'C6H6' and sample.selectedAtoms == [1]
     assert 'missing.xyz" could not be read' in errors[0][0] and 'No such file' in errors[0][0]
     assert errors[1][0].endswith('Atom 1: "Q" is not an element.')
+
+
+def test_sample_loads_a_crystal(qcore_application, nacl_cif):
+    sample = Sample()
+    sample.selectAtom(0, 'only')
+    sample.setViewRepeat(2, 1, 1)
+    loads = _emissions(sample.sampleChanged)
+
+    sample.loadStructure(str(nacl_cif))
+
+    assert loads and sample.periodic and sample.summary == 'NaCl.cif · ClNa · Z = 4 · 8 atoms · Fm-3m'
+    assert sample.cell == {
+        'a': 5.6402, 'b': 5.6402, 'c': 5.6402, 'alpha': 90.0, 'beta': 90.0, 'gamma': 90.0, 'volume': 179.4252,
+        'spaceGroup': 'Fm-3m', 'vectors': [[5.6402, 0.0, 0.0], [0.0, 5.6402, 0.0], [0.0, 0.0, 5.6402]],
+    }  # fmt: skip
+    assert sample.atoms[5]['label'] == 'Cl6' and (sample.atoms[5]['fx'], sample.atoms[5]['fy']) == (0.5, 0.0)
+    assert sample.coordinates == 'fractional' and sample.viewRepeat == [1, 1, 1]
+    assert sample.selectedAtoms == [] and len(sample.sceneAtoms) == 27 and len(sample.cellEdges) == 12
+
+    oxygen = nacl_cif.with_name('oxygen.xyz')
+    oxygen.write_text('1\n\nO 0 0 0\n', encoding='utf-8')
+    sample.loadStructure(str(oxygen))
+    assert not sample.periodic and sample.cell == {} and sample.coordinates == 'cartesian'
+
+
+def test_sample_scene_is_built_once_per_change(qcore_application, nacl_cif, monkeypatch):
+    import Backends.Py.sample as sample_module
+
+    builds = []
+    build = sample_module.build_scene
+    monkeypatch.setattr(sample_module, 'build_scene', lambda *args: builds.append(args) or build(*args))
+    sample = Sample()
+    sample.loadStructure(str(nacl_cif))
+    scene_changes = _emissions(sample.sceneChanged)
+
+    for _ in range(2):
+        sample.sceneAtoms, sample.sceneBonds, sample.cellEdges, sample.sceneCentre, sample.sceneExtent
+    sample.setAtomFixed(0, True)  # drawn, so the scene changes, but its geometry does not
+    sample.selectAtom(1, 'only')
+    assert sample.sceneAtoms[0]['fixed'] and sample.selectedSceneAtoms
+    assert len(builds) == 1 and len(scene_changes) == 1
+
+    sample.setViewBoundaryAtoms(False)
+    assert len(sample.sceneAtoms) == 8 and len(builds) == 2 and len(scene_changes) == 2
+
+
+def test_sample_repeat_is_clamped_and_limited(qcore_application, nacl_cif, tmp_path):
+    sample = Sample()
+    sample.loadStructure(str(nacl_cif))
+    sample.setViewRepeat(0, 9, 2)
+    assert sample.viewRepeat == [1, 4, 2]
+
+    big = tmp_path / 'big.xyz'  # 40 atoms: 4 × 4 × 3 cells are 1920, 4 × 4 × 4 are 2560
+    big.write_text('40\nLattice="10 0 0 0 10 0 0 0 10"\n' + ''.join(f'Ar {i % 10} {i // 10} 0\n' for i in range(40)))
+    sample.loadStructure(str(big))
+    sample.setViewRepeat(4, 4, 3)
+    refusals = _emissions(sample.viewChanged)
+    sample.setViewRepeat(4, 4, 4)
+    assert sample.viewRepeat == [4, 4, 3] and refusals  # the controls re-read the repeat
+
+
+def test_sample_selects_copies_in_other_cells(qcore_application, nacl_cif):
+    sample = Sample()
+    sample.loadStructure(str(nacl_cif))
+    scene = sample.sceneAtoms
+    home = 0  # Na1 at the origin is the first scene atom
+    along_a = next(i for i, atom in enumerate(scene) if atom['atom'] == 0 and atom['x'] > 5 and atom['y'] == atom['z'] == 0)
+
+    sample.selectSceneAtom(home, 'only')
+    sample.selectSceneAtom(along_a, 'toggle')
+
+    assert sample.selectionText == 'Na1, Na1 [1 0 0]'
+    assert sample.selectionMeasurement == 'distance = 5.6402\u00a0Å'  # the lattice parameter
+    assert sample.selectedAtoms == [0] and sample.selectedSceneAtoms == [home, along_a]
+
+    sample.selectAtom(0, 'only')  # a table row is the atom in its own cell
+    assert sample.selectedSceneAtoms == [home] and sample.selectionText == 'Na1'
+
+    sample.selectSceneAtom(along_a, 'toggle')
+    sample.setViewBoundaryAtoms(False)  # the copy is no longer drawn but stays selected
+    assert sample.selectedSceneAtoms == [0] and sample.selectionText == 'Na1, Na1 [1 0 0]'
 
 
 # Calculations
@@ -412,11 +503,25 @@ def test_backend_fills_project_summary(backend):
     assert backend.project.calculations == ['Vibrational frequencies']
 
 
+def test_backend_relays_the_cell_to_the_method_part(backend, nacl_cif):
+    backend.sample.loadStructure(str(nacl_cif))
+
+    assert backend.project.sampleName == 'ClNa, 8 atoms'
+    assert backend.method.periodic and not backend.method.canRun
+    assert backend.method.cannotRunReason == 'ORCA runs molecules only; this sample is periodic.'
+    assert backend.method.kpointGrid == [2, 2, 2]
+
+    backend.method.setKpointGrid(3, 3, 1)
+    assert backend.method.kpointGrid == [3, 3, 1]
+    backend.method.setKpointSpacing(0.05)  # a new spacing replaces the grid set by hand
+    assert backend.method.kpointGrid == [4, 4, 4]
+
+
 def test_backend_relays_a_loaded_structure(backend, tmp_path):
     water = tmp_path / 'water.xyz'
     water.write_text('3\n\nO 0 0 0\nH 0 0.76 -0.47\nH 0 -0.76 -0.47\n', encoding='utf-8')
 
-    backend.sample.loadXyz(str(water))
+    backend.sample.loadStructure(str(water))
 
     assert backend.project.sampleName == 'H2O, 3 atoms'
     assert backend.job._sample is backend.sample.logic  # the next run uses the loaded structure

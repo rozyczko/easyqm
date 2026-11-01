@@ -8,16 +8,9 @@ import EasyApplication.Gui.Components as EaComponents
 EaComponents.SideBarColumn {
 
     EaElements.GroupBox {
-        title: qsTr('K-point grid')
-        icon: 'border-all'
-        collapsed: false
-
-        Loader { source: 'Groups/KPointGrid.qml' }
-    }
-
-    EaElements.GroupBox {
         title: qsTr('Symmetry')
         icon: 'shapes'
+        collapsed: false
 
         Loader { source: 'Groups/Symmetry.qml' }
     }

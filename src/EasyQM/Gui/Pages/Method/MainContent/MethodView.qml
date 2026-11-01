@@ -17,6 +17,7 @@ Rectangle {
     readonly property int commonSpacing: EaStyle.Sizes.fontPixelSize * 1.5
     readonly property int contentWidth: width - 2 * commonSpacing
     readonly property bool canRun: Globals.BackendWrapper.methodEngineFound &&
+                                   Globals.BackendWrapper.methodCanRun &&
                                    Globals.BackendWrapper.calculationsSelectedCount > 0 &&
                                    !Globals.BackendWrapper.jobRunning
 
@@ -76,6 +77,13 @@ Rectangle {
             found: Globals.BackendWrapper.methodEngineFound
             subtitle: Globals.BackendWrapper.methodEngineCardText
             path: Globals.BackendWrapper.methodEnginePath
+        }
+
+        // ORCA and a crystal
+        EaElements.Label {
+            visible: !Globals.BackendWrapper.methodCanRun
+            color: EaStyle.Colors.red
+            text: Globals.BackendWrapper.methodCannotRunReason
         }
 
         // Run

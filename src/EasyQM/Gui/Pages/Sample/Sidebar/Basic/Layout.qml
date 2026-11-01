@@ -4,6 +4,8 @@ import QtQuick.Controls
 import EasyApplication.Gui.Elements as EaElements
 import EasyApplication.Gui.Components as EaComponents
 
+import Gui.Globals as Globals
+
 
 EaComponents.SideBarColumn {
 
@@ -30,10 +32,17 @@ EaComponents.SideBarColumn {
     }
 
     EaElements.GroupBox {
+        id: unitCellGroup
         title: qsTr('Unit cell')
         icon: 'cube'
 
         Loader { source: 'Groups/UnitCell.qml' }
+
+        // Each loaded structure: open for a crystal, closed for a molecule.
+        Connections {
+            target: Globals.BackendWrapper
+            function onSampleSummaryChanged() { unitCellGroup.collapsed = !Globals.BackendWrapper.samplePeriodic }
+        }
     }
 
     EaElements.GroupBox {

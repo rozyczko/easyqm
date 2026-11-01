@@ -45,6 +45,8 @@ class Capabilities:
 
 class EngineAdapter(ABC):
     name: str
+    # 'molecule' and/or 'crystal'
+    systems: tuple[str, ...] = ('molecule',)
     # Files of one job inside its run folder. The engine's standard output is the output file.
     input_file_name = 'job.inp'
     output_file_name = 'job.out'
@@ -57,6 +59,12 @@ class EngineAdapter(ABC):
 
     @abstractmethod
     def capabilities(self) -> Capabilities: ...
+
+    def system_problem(self, periodic: bool) -> str:
+        """Why this engine cannot run the sample, or '' if it can."""
+        if periodic and 'crystal' not in self.systems:
+            return f'{self.name} runs molecules only; this sample is periodic.'
+        return ''
 
     def input_text(self, sample, calculations, method, settings) -> str:
         """The input file for the selected workflow, as one text."""

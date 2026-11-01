@@ -12,6 +12,7 @@ Column {
     spacing: EaStyle.Sizes.fontPixelSize
 
     readonly property int coordinateWidth: EaStyle.Sizes.fontPixelSize * 4.5
+    readonly property bool fractional: Globals.BackendWrapper.sampleCoordinates === 'fractional'
 
     EaComponents.TableView {
         id: atomsTable
@@ -53,17 +54,17 @@ Column {
             EaComponents.TableViewLabel {
                 width: coordinateWidth
                 horizontalAlignment: Text.AlignRight
-                text: qsTr('x (Å)')
+                text: fractional ? qsTr('x') : qsTr('x (Å)')
             }
             EaComponents.TableViewLabel {
                 width: coordinateWidth
                 horizontalAlignment: Text.AlignRight
-                text: qsTr('y (Å)')
+                text: fractional ? qsTr('y') : qsTr('y (Å)')
             }
             EaComponents.TableViewLabel {
                 width: coordinateWidth
                 horizontalAlignment: Text.AlignRight
-                text: qsTr('z (Å)')
+                text: fractional ? qsTr('z') : qsTr('z (Å)')
             }
             EaComponents.TableViewLabel {
                 width: EaStyle.Sizes.tableRowHeight
@@ -110,17 +111,17 @@ Column {
             EaComponents.TableViewLabel {
                 width: coordinateWidth
                 horizontalAlignment: Text.AlignRight
-                text: atom.x.toFixed(4)
+                text: (fractional ? atom.fx : atom.x).toFixed(4)
             }
             EaComponents.TableViewLabel {
                 width: coordinateWidth
                 horizontalAlignment: Text.AlignRight
-                text: atom.y.toFixed(4)
+                text: (fractional ? atom.fy : atom.y).toFixed(4)
             }
             EaComponents.TableViewLabel {
                 width: coordinateWidth
                 horizontalAlignment: Text.AlignRight
-                text: atom.z.toFixed(4)
+                text: (fractional ? atom.fz : atom.z).toFixed(4)
             }
             EaComponents.TableViewCheckBox {
                 width: EaStyle.Sizes.tableRowHeight
@@ -157,7 +158,9 @@ Column {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             color: EaStyle.Colors.themeForegroundMinor
-            text: qsTr('%1 atoms · Cartesian · Å').arg(Globals.BackendWrapper.sampleAtomCount)
+            text: fractional ?
+                      qsTr('%1 atoms · Fractional').arg(Globals.BackendWrapper.sampleAtomCount) :
+                      qsTr('%1 atoms · Cartesian · Å').arg(Globals.BackendWrapper.sampleAtomCount)
         }
     }
 }

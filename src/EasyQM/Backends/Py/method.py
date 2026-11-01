@@ -17,6 +17,7 @@ from .logic.engines.base import EngineAdapter
 from .logic.engines.orca import OrcaAdapter
 from .logic.method import Method as MethodLogic
 from .logic.method import RunSettings
+from .logic.method import kpoint_grid
 
 
 class Method(QObject):
@@ -25,6 +26,9 @@ class Method(QObject):
     systemChanged = Signal()
     scfChanged = Signal()
     runSettingsChanged = Signal()
+    # The sample became a molecule or a crystal, or another crystal.
+    sampleChanged = Signal()
+    kpointsChanged = Signal()
 
     def __init__(
         self,
@@ -43,6 +47,7 @@ class Method(QObject):
         self._settings = settings if settings is not None else QSettings('EasyScience', 'EasyQM')
         self._adapter.executable = self._settings.value(self._settings_key, '') or None
         self._info = self._adapter.detect()
+        self._cell = None  # the sample's unit cell, set by PyBackend; None for a molecule
 
     # For the other backend parts (plain Python, not exposed to QML)
 
@@ -61,6 +66,12 @@ class Method(QObject):
     @property
     def run_settings(self) -> RunSettings:
         return self._run
+
+    def set_sample_cell(self, cell) -> None:
+        """The sample's `logic.sample.Cell`, or None for a molecule."""
+        self._cell = cell
+        self.sampleChanged.emit()
+        self.kpointsChanged.emit()
 
     @property
     def _settings_key(self) -> str:
@@ -106,6 +117,48 @@ class Method(QObject):
         self._adapter.executable = path or None
         self._settings.setValue(self._settings_key, path)
         self.redetect()
+
+    # Sample
+
+    @Property(bool, notify=sampleChanged)
+    def periodic(self) -> bool:
+        return self._cell is not None
+
+    @Property(bool, notify=sampleChanged)
+    def canRun(self) -> bool:
+        """Whether the engine runs this kind of system; the Run button also needs a found engine."""
+        return not self.cannotRunReason
+
+    @Property(str, notify=sampleChanged)
+    def cannotRunReason(self) -> str:
+        return self._adapter.system_problem(self._cell is not None)
+
+    # K-points (crystals)
+
+    @Property(float, notify=kpointsChanged)
+    def kpointSpacing(self) -> float:
+        return self._logic.kpoints.spacing
+
+    @Slot(float)
+    def setKpointSpacing(self, value: float) -> None:
+        """A new spacing also replaces a grid set by hand."""
+        if value > 0:
+            self._logic.kpoints.spacing = float(value)
+            self._logic.kpoints.grid = None
+            self.kpointsChanged.emit()
+
+    @Property('QVariantList', notify=kpointsChanged)
+    def kpointGrid(self) -> list:
+        """[n1, n2, n3]: the grid set by hand, else the one from the spacing; [] for a molecule."""
+        if self._cell is None:
+            return []
+        kpoints = self._logic.kpoints
+        return list(kpoints.grid or kpoint_grid(self._cell, kpoints.spacing))
+
+    @Slot(int, int, int)
+    def setKpointGrid(self, n1: int, n2: int, n3: int) -> None:
+        self._logic.kpoints.grid = tuple(max(1, int(n)) for n in (n1, n2, n3))
+        self.kpointsChanged.emit()
 
     # Level of theory
 

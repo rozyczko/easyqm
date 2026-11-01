@@ -51,21 +51,42 @@ QtObject {
     readonly property string sampleSummary: activeBackend.sample.summary
     readonly property int sampleAtomCount: activeBackend.sample.atomCount
     readonly property bool samplePeriodic: activeBackend.sample.periodic
+    // {a, b, c, alpha, beta, gamma, volume, spaceGroup, vectors}; empty for a molecule
+    readonly property var sampleCell: activeBackend.sample.cell
     readonly property int sampleCharge: activeBackend.sample.charge
     readonly property int sampleMultiplicity: activeBackend.sample.multiplicity
     readonly property var sampleAtoms: activeBackend.sample.atoms
-    readonly property var sampleBonds: activeBackend.sample.bonds
     readonly property int sampleFixedCount: activeBackend.sample.fixedCount
     // On a selected atom, fixes or frees every selected atom
     function sampleSetAtomFixed(index, value) { activeBackend.sample.setAtomFixed(index, value) }
-    function sampleLoadXyz(path) { activeBackend.sample.loadXyz(path) }
+    // XYZ (extended XYZ with a cell) or CIF
+    function sampleLoadStructure(path) { activeBackend.sample.loadStructure(path) }
+    // What the viewer draws: atoms with copies in other cells, bonds between them, cell edges
+    readonly property var sampleSceneAtoms: activeBackend.sample.sceneAtoms
+    readonly property var sampleSceneBonds: activeBackend.sample.sceneBonds
+    readonly property var sampleCellEdges: activeBackend.sample.cellEdges
+    readonly property var sampleSceneCentre: activeBackend.sample.sceneCentre
+    readonly property real sampleSceneExtent: activeBackend.sample.sceneExtent
+    readonly property int sampleSceneAtomLimit: activeBackend.sample.sceneAtomLimit
+    // Display settings
+    readonly property var sampleViewRepeat: activeBackend.sample.viewRepeat
+    function sampleSetViewRepeat(na, nb, nc) { activeBackend.sample.setViewRepeat(na, nb, nc) }
+    readonly property bool sampleViewBoundaryAtoms: activeBackend.sample.viewBoundaryAtoms
+    function sampleSetViewBoundaryAtoms(value) { activeBackend.sample.setViewBoundaryAtoms(value) }
+    // 'cartesian' | 'fractional', for the atom tables
+    readonly property string sampleCoordinates: activeBackend.sample.coordinates
+    function sampleSetCoordinates(value) { activeBackend.sample.setCoordinates(value) }
     // Selected atom indices, shared by the viewer and the atom tables
     readonly property var sampleSelectedAtoms: activeBackend.sample.selectedAtoms
+    // Indices into sampleSceneAtoms of the selected drawn atoms
+    readonly property var sampleSelectedSceneAtoms: activeBackend.sample.selectedSceneAtoms
     readonly property string sampleSelectionText: activeBackend.sample.selectionText
     // Distance, angle or dihedral of 2, 3 or 4 selected atoms
     readonly property string sampleSelectionMeasurement: activeBackend.sample.selectionMeasurement
     // mode: 'only' (click), 'toggle' (Ctrl-click), 'range' (Shift-click)
     function sampleSelectAtom(index, mode) { activeBackend.sample.selectAtom(index, mode) }
+    // The viewer's pick of a drawn atom; mode 'only' or 'toggle'
+    function sampleSelectSceneAtom(sceneIndex, mode) { activeBackend.sample.selectSceneAtom(sceneIndex, mode) }
     function sampleClearSelection() { activeBackend.sample.clearSelection() }
 
     ////////////////////
@@ -113,6 +134,16 @@ QtObject {
     readonly property string methodEngineCardText: activeBackend.method.engineCardText
     function methodRedetect() { activeBackend.method.redetect() }
     function methodSetEnginePath(value) { activeBackend.method.setEnginePath(value) }
+    // Whether the engine runs this kind of system (molecule or crystal), and why not
+    readonly property bool methodCanRun: activeBackend.method.canRun
+    readonly property string methodCannotRunReason: activeBackend.method.cannotRunReason
+
+    readonly property bool methodPeriodic: activeBackend.method.periodic
+    readonly property real methodKpointSpacing: activeBackend.method.kpointSpacing
+    function methodSetKpointSpacing(value) { activeBackend.method.setKpointSpacing(value) }
+    // [n1, n2, n3]; [] for a molecule
+    readonly property var methodKpointGrid: activeBackend.method.kpointGrid
+    function methodSetKpointGrid(n1, n2, n3) { activeBackend.method.setKpointGrid(n1, n2, n3) }
 
     readonly property string methodFamily: activeBackend.method.family
     readonly property var methodFamilyChoices: activeBackend.method.familyChoices
