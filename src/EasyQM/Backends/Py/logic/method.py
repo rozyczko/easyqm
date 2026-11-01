@@ -25,6 +25,10 @@ class KPoints:
     spacing: float = 0.1  # Å⁻¹
     grid: Optional[tuple[int, int, int]] = None  # set by hand; None follows the spacing
 
+    def for_cell(self, cell) -> tuple[int, int, int]:
+        """The grid set by hand, else the one the spacing gives this cell."""
+        return self.grid or kpoint_grid(cell, self.spacing)
+
 
 def kpoint_grid(cell, spacing: float) -> tuple[int, int, int]:
     """The smallest grid whose points are at most `spacing` apart along each reciprocal vector."""
@@ -44,6 +48,7 @@ class Method:
     scf_max_iterations: int = 125
     integration_grid: str = 'DefGrid2'
     stability_check: bool = False
+    occupations: str = 'smearing'  # plane-wave engines: 'smearing' (metals) or 'fixed' (insulators)
     kpoints: KPoints = field(default_factory=KPoints)  # crystals only
 
 
@@ -61,4 +66,4 @@ def describe(method: Method, capabilities) -> str:
         theory = dict(capabilities.functionals).get(method.functional, method.functional)
         if method.dispersion != 'none':
             theory += '-' + dict(capabilities.dispersions).get(method.dispersion, method.dispersion)
-    return f'{theory}/{method.basis_set}'
+    return f'{theory}/{dict(capabilities.basis_sets).get(method.basis_set, method.basis_set)}'

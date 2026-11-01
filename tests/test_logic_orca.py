@@ -7,6 +7,7 @@ import pytest
 
 from Backends.Py.logic.calculations import Calculations
 from Backends.Py.logic.calculations import CalculationType
+from Backends.Py.logic.engines import base
 from Backends.Py.logic.engines import orca
 from Backends.Py.logic.engines.orca import OrcaAdapter
 from Backends.Py.logic.method import Method
@@ -52,7 +53,7 @@ def test_version_from_banner_when_folder_has_none(tmp_path, monkeypatch):
     executable.parent.mkdir()
     executable.write_text('', encoding='utf-8')
     banner = '   Program Version 6.1.1  -  RELEASE   -\n'
-    monkeypatch.setattr(orca.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=banner))
+    monkeypatch.setattr(base.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=banner))
 
     assert OrcaAdapter(str(executable)).detect().version == '6.1.1'
 
@@ -65,7 +66,7 @@ def test_version_probe_failure_leaves_version_empty(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         raise OSError('not a program')
 
-    monkeypatch.setattr(orca.subprocess, 'run', fail)
+    monkeypatch.setattr(base.subprocess, 'run', fail)
     info = OrcaAdapter(str(executable)).detect()
     assert info.found and info.version == ''
 
@@ -86,7 +87,12 @@ def test_method_defaults_are_orca_choices():
     }
     for name, choices in pairs.items():
         assert getattr(method, name) in [value for value, _ in choices], name
-    assert {field.name for field in fields(Method)} - set(pairs) == {'scf_max_iterations', 'stability_check', 'kpoints'}
+    assert {field.name for field in fields(Method)} - set(pairs) == {
+        'scf_max_iterations',
+        'stability_check',
+        'occupations',
+        'kpoints',
+    }
 
 
 def test_kpoint_grid_from_spacing():
@@ -189,6 +195,25 @@ def test_hartree_fock_and_other_method_keywords():
 def test_input_needs_a_calculation():
     with pytest.raises(ValueError):
         _input()
+
+
+def test_current_step_follows_the_output():
+    adapter = OrcaAdapter()
+    opt, sp, freq = (
+        CalculationType.GEOMETRY_OPTIMISATION,
+        CalculationType.SINGLE_POINT,
+        CalculationType.VIBRATIONAL_FREQUENCIES,
+    )
+    cycle = '         *                GEOMETRY OPTIMIZATION CYCLE   1            *\n'
+    final = '                 *** FINAL ENERGY EVALUATION AT THE STATIONARY POINT ***\n'
+    analytical = 'Nuclear geometric perturbations         ... YES (  27 perturbations)\n'
+    assert adapter.current_step('SCF ITERATIONS\n', [opt, sp, freq]) == 0
+    assert adapter.current_step(cycle + final, [opt, sp, freq]) == 1
+    assert adapter.current_step(cycle + final + analytical, [opt, sp, freq]) == 2
+    # The single point at the input geometry runs first, as its own job.
+    assert adapter.current_step('SCF ITERATIONS\n', [sp, opt]) == 0
+    assert adapter.current_step(cycle, [sp, opt]) == 1
+    assert adapter.current_step('                           ORCA NUMERICAL FREQUENCIES\n', [sp, freq]) == 1
 
 
 def test_success_is_the_normal_termination_line():

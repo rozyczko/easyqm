@@ -85,6 +85,7 @@ class PyBackend(QObject):
 
     def _relay_engine(self) -> None:
         self._project.setEngine(self._method.engineName)
+        self._job.set_engine(self._method.adapter, self._method.logic)
         self._job.set_executable(self._method.enginePath if self._method.engineFound else '')
 
     def _relay_project_folder(self) -> None:
@@ -102,4 +103,4 @@ class PyBackend(QObject):
         if self._job.state == 'running':
             self._results.clear(describe(self._method.logic, self._method.adapter.capabilities()))
         elif self._job.state != 'idle':
-            self._results.set_results(self._method.adapter.parse(self._job.output))
+            self._results.set_results(self._job.adapter.parse(self._job.output))

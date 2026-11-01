@@ -11,23 +11,20 @@ point at the *input* geometry before an optimisation needs a second job, joined 
 
 import re
 import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Optional
 
 from ..calculations import CalculationType
 from ..calculations import info
 from ..results import Results
-from ..runner import NO_WINDOW
 from . import orca_output
 from .base import Capabilities
 from .base import EngineAdapter
 from .base import EngineInfo
+from .base import banner
 
 _VERSION_FOLDER = re.compile(r'^\d+(\.\d+)+$')
 _VERSION_BANNER = re.compile(r'Program Version\s+(\d+(?:\.\d+)+)')
-_VERSION_PROBE_TIMEOUT = 20  # s
 NORMAL_TERMINATION = 'ORCA TERMINATED NORMALLY'
 
 CAPABILITIES = Capabilities(
@@ -73,6 +70,16 @@ _MAXCORE_SHARE = 0.75
 
 class OrcaAdapter(EngineAdapter):
     name = 'ORCA'
+    programs = ('orca',)
+    # The single point after an optimisation is its final energy evaluation; frequencies start
+    # with the analytical Hessian's response calculation or the numerical displacements.
+    step_markers = {
+        CalculationType.GEOMETRY_OPTIMISATION: re.compile('GEOMETRY OPTIMIZATION CYCLE'),
+        CalculationType.SINGLE_POINT: re.compile('FINAL ENERGY EVALUATION AT THE STATIONARY POINT'),
+        CalculationType.VIBRATIONAL_FREQUENCIES: re.compile(
+            r'Nuclear geometric perturbations\s+\.\.\.\s+YES|ORCA NUMERICAL FREQUENCIES'
+        ),
+    }
 
     def __init__(self, executable: Optional[str] = None):
         # A user-configured path takes precedence over PATH.
@@ -81,7 +88,7 @@ class OrcaAdapter(EngineAdapter):
     # Detection
 
     def detect(self) -> EngineInfo:
-        path = self.executable or shutil.which('orca')
+        path = self.executable or shutil.which(self.programs[0])
         if path is None or not Path(path).is_file():
             return EngineInfo(found=False)
         path = str(Path(path))
@@ -192,18 +199,5 @@ def _version_from_path(path: str) -> str:
 
 def _version_from_banner(path: str) -> str:
     """ORCA prints its banner, with the version, before it complains about a missing input."""
-    with tempfile.TemporaryDirectory(prefix='easyqm-') as folder:
-        try:
-            result = subprocess.run(
-                [path, 'missing.inp'],
-                cwd=folder,
-                capture_output=True,
-                text=True,
-                errors='replace',
-                timeout=_VERSION_PROBE_TIMEOUT,
-                creationflags=NO_WINDOW,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return ''
-    match = _VERSION_BANNER.search(result.stdout or '')
+    match = _VERSION_BANNER.search(banner([path, 'missing.inp']))
     return match.group(1) if match else ''

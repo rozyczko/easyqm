@@ -25,6 +25,8 @@ from .logic.runner import JobState
 from .logic.runner import new_run_folder
 
 POLL_INTERVAL_MS = 500
+# Output kept from the previous read, so that a step marker split between two reads is found.
+_MARKER_OVERLAP = 200
 # Where runs go while no project has been created (see the Project page hint).
 SCRATCH_ROOT = Path(tempfile.gettempdir()) / 'EasyQM'
 
@@ -50,6 +52,7 @@ class Job(QObject):
         super().__init__(parent)
         # Logic objects of the other parts; read when a job starts.
         self._adapter = adapter
+        self._job_adapter = adapter  # the engine of the job that runs or ran last
         self._sample = sample
         self._calculations = calculations
         self._method = method
@@ -66,6 +69,9 @@ class Job(QObject):
         self._input_path = ''
         self._output_path = ''
         self._chunks: list[str] = []
+        self._steps = []  # the workflow of the job, and the index of the step it is in
+        self._step = 0
+        self._step_failed = False  # the output shows the step failed, so it stays the current one
         self._started = 0.0
         self._stopping = False
 
@@ -79,8 +85,17 @@ class Job(QObject):
 
     # Relay targets (plain Python)
 
+    def set_engine(self, adapter: EngineAdapter, method) -> None:
+        """The active engine and its method; a running job keeps its own."""
+        self._adapter, self._method = adapter, method
+
     def set_executable(self, path: str) -> None:
         self._executable = path
+
+    @property
+    def adapter(self) -> EngineAdapter:
+        """The engine of the job that runs or ran last, which can read its output."""
+        return self._job_adapter
 
     def set_root_folder(self, path: str) -> None:
         """Folder whose `runs/` receives new jobs; empty for the scratch folder."""
@@ -103,6 +118,19 @@ class Job(QObject):
     @Property(str, notify=stateChanged)
     def message(self) -> str:
         return self._message
+
+    @Property('QVariantMap', notify=stateChanged)
+    def stepStates(self) -> dict:
+        """The state of each step of the job by calculation type: steps before the current one
+        are completed, the current one has the job's state, later ones have not run."""
+        states = {}
+        for index, step in enumerate(self._steps):
+            if index < self._step or self._state is JobState.COMPLETED:
+                state = JobState.COMPLETED
+            else:
+                state = self._state if index == self._step else JobState.IDLE
+            states[step.value] = state.value
+        return states
 
     # Files
 
@@ -130,17 +158,22 @@ class Job(QObject):
     def run(self) -> None:
         if self.running:
             return
+        self._steps, self._step, self._step_failed = [], 0, False
         try:
             if not self._executable:
                 raise RuntimeError(f'{self._adapter.name} was not found. Configure its path first.')
-            text = self._adapter.input_text(self._sample, self._calculations, self._method, self._settings)
+            files = self._adapter.input_files(self._sample, self._calculations, self._method, self._settings)
+            commands = self._adapter.commands(self._executable, list(files))
             folder = new_run_folder(Path(self._root) if self._root else SCRATCH_ROOT)
-            input_path = folder / self._adapter.input_file_name
-            input_path.write_text(text, encoding='utf-8')
+            for name, text in files.items():
+                (folder / name).write_text(text, encoding='utf-8')
+            input_path = folder / next(iter(files))
             output_path = folder / self._adapter.output_file_name
             self._set_files(folder, input_path, output_path)
             self._clear_output()
-            self._runner.start(self._adapter.command(self._executable, input_path), folder, output_path)
+            self._job_adapter = self._adapter
+            self._runner.start(commands, folder, output_path)
+            self._steps = self._calculations.workflow()
         except (RuntimeError, ValueError, OSError) as error:
             self._set_state(JobState.FAILED, str(error))
             return
@@ -172,16 +205,25 @@ class Job(QObject):
         elapsed = _duration(time.monotonic() - self._started)
         if self._stopping:
             self._set_state(JobState.STOPPED, f'Stopped after {elapsed}')
-        elif code == 0 and self._adapter.succeeded(self.output):
+        elif code == 0 and self._job_adapter.succeeded(self.output):
             self._set_state(JobState.COMPLETED, f'Completed in {elapsed}')
         else:
-            message = f'{self._adapter.name} ended with exit code {code} after {elapsed}; see the output'
+            message = f'{self._job_adapter.name} ended with exit code {code} after {elapsed}; see the output'
             self._set_state(JobState.FAILED, message)
 
     def _append(self, text: str) -> None:
         if text:
+            recent = (self._chunks[-1][-_MARKER_OVERLAP:] if self._chunks else '') + text
             self._chunks.append(text)
             self.outputAppended.emit(text)
+            if self._step_failed:
+                return
+            adapter = self._job_adapter
+            step = max(self._step, adapter.current_step(recent, self._steps))
+            self._step_failed = adapter.failure_marker is not None and adapter.failure_marker.search(recent) is not None
+            if step != self._step:
+                self._step = step
+                self.stateChanged.emit()
 
     def _clear_output(self) -> None:
         self._chunks = []

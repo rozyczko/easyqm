@@ -64,6 +64,11 @@ class Frequencies:
         return sum(mode.frequency < 0 for mode in self.modes)
 
     @property
+    def has_ir(self) -> bool:
+        """Γ phonons of a crystal come without IR intensities."""
+        return any(mode.ir_intensity is not None for mode in self.modes)
+
+    @property
     def has_raman(self) -> bool:
         return any(mode.raman_activity is not None for mode in self.modes)
 
@@ -71,8 +76,11 @@ class Frequencies:
 @dataclass
 class Results:
     final_energy: Optional[float] = None  # Eh, the last energy of the job
-    homo: Optional[float] = None  # eV
-    lumo: Optional[float] = None  # eV
+    # eV; for a crystal the valence band maximum and the conduction band minimum
+    homo: Optional[float] = None
+    lumo: Optional[float] = None
+    fermi_energy: Optional[float] = None  # eV, crystals with smearing only
+    crystal: bool = False  # homo and lumo are band edges
     dipole: Optional[float] = None  # Debye
     optimisation: Optional[Optimisation] = None
     frequencies: Optional[Frequencies] = None
@@ -83,7 +91,7 @@ class Results:
 
     @property
     def empty(self) -> bool:
-        return self == Results()
+        return self == Results(crystal=self.crystal)
 
 
 # Geometry comparison for the optimisation card

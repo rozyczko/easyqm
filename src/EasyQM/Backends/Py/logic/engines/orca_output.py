@@ -16,8 +16,9 @@ from ..results import Mode
 from ..results import Optimisation
 from ..results import Results
 from ..sample import Atom
-
-_NUMBER = r'-?\d+\.\d+(?:[eE][-+]?\d+)?'
+from .parsing import NUMBER as _NUMBER
+from .parsing import block as _block
+from .parsing import last_float as _last_float
 
 _FINAL_ENERGY = re.compile(rf'FINAL SINGLE POINT ENERGY\s+({_NUMBER})')
 _OPT_CYCLE = re.compile(r'GEOMETRY OPTIMIZATION CYCLE\s+(\d+)')
@@ -48,31 +49,6 @@ def parse(output: str) -> Results:
         optimisation=_optimisation(output, lines),
         frequencies=_frequencies(output, lines),
     )
-
-
-def _last_float(pattern: re.Pattern, text: str) -> Optional[float]:
-    matches = pattern.findall(text)
-    return float(matches[-1]) if matches else None
-
-
-def _block(lines: list[str], header: str, row: re.Pattern, start: int = 0) -> list[re.Match]:
-    """Rows matching `row` that follow the last line matching `header` at or after `start`.
-
-    Lines between the header and the first row (underlines, column titles) are skipped;
-    the block ends at the first line after a row that is not a row.
-    """
-    title = re.compile(header)
-    positions = [i for i in range(start, len(lines)) if title.search(lines[i])]
-    if not positions:
-        return []
-    rows = []
-    for line in lines[positions[-1] + 1 :]:
-        match = row.match(line)
-        if match:
-            rows.append(match)
-        elif rows:
-            break
-    return rows
 
 
 def _atoms(lines: list[str], index: int) -> list[Atom]:

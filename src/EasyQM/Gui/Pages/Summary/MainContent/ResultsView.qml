@@ -19,7 +19,16 @@ Rectangle {
     readonly property int geometryRowsCollapsed: 3
 
     property bool showAllGeometry: false
-    property string frequencyView: 'ir'  // 'ir', 'raman' or 'table'
+    property string frequencyView: 'ir'  // 'ir', 'raman' or 'table', as last chosen
+    // The chosen view if the modes have its numbers, else the nearest one that has them:
+    // phonons of a metal come with neither IR nor Raman.
+    readonly property string shownView: {
+        const ir = Globals.BackendWrapper.resultsHasIr
+        if (frequencyView === 'raman' && !Globals.BackendWrapper.resultsHasRaman) {
+            return ir ? 'ir' : 'table'
+        }
+        return frequencyView === 'ir' && !ir ? 'table' : frequencyView
+    }
     // Mode number shared by the spectrum and the table; the future mode animation plays it.
     property var selectedMode: null
 
@@ -36,13 +45,15 @@ Rectangle {
         color: EaStyle.Colors.themeForegroundMinor
     }
 
-    // EasyApp sizes a table's flexible column when its header is created, before the main
-    // area has its final width.
+    // EasyApp sizes a table's columns when its header is created, before the main area has
+    // its final width and before optional columns know whether they are shown.
     component WideTable: EaComponents.TableView {
         // EasyApp delays presses by 10 ms, and the replayed press never reaches the rows'
         // TapHandler, so row clicks would be lost.
         pressDelay: 0
-        onWidthChanged: {
+        onWidthChanged: relayout()
+
+        function relayout() {
             if (headerItem === null) {
                 return
             }
@@ -71,9 +82,6 @@ Rectangle {
         function onResultsAvailableChanged() {
             page.showAllGeometry = false
             page.selectedMode = null
-            if (page.frequencyView === 'raman' && !Globals.BackendWrapper.resultsHasRaman) {
-                page.frequencyView = 'ir'
-            }
         }
     }
 
@@ -340,9 +348,10 @@ Rectangle {
                             anchors.right: parent.right
 
                             EaElements.SideBarButton {
+                                visible: Globals.BackendWrapper.resultsHasIr
                                 width: EaStyle.Sizes.fontPixelSize * 9
                                 checkable: true
-                                checked: page.frequencyView === 'ir'
+                                checked: page.shownView === 'ir'
                                 text: qsTr('IR spectrum')
                                 onClicked: page.frequencyView = 'ir'
                             }
@@ -350,14 +359,14 @@ Rectangle {
                                 visible: Globals.BackendWrapper.resultsHasRaman
                                 width: EaStyle.Sizes.fontPixelSize * 10
                                 checkable: true
-                                checked: page.frequencyView === 'raman'
+                                checked: page.shownView === 'raman'
                                 text: qsTr('Raman spectrum')
                                 onClicked: page.frequencyView = 'raman'
                             }
                             EaElements.SideBarButton {
                                 width: EaStyle.Sizes.fontPixelSize * 10
                                 checkable: true
-                                checked: page.frequencyView === 'table'
+                                checked: page.shownView === 'table'
                                 text: Globals.BackendWrapper.resultsModes.length === 1 ?
                                           qsTr('Table (1 mode)') :
                                           qsTr('Table (%1 modes)').arg(Globals.BackendWrapper.resultsModes.length)
@@ -367,12 +376,12 @@ Rectangle {
                     }
 
                     Components.StickSpectrum {
-                        visible: page.frequencyView !== 'table'
+                        visible: page.shownView !== 'table'
                         width: parent.width
                         height: EaStyle.Sizes.fontPixelSize * 26
-                        points: page.spectrumPoints(page.frequencyView)
+                        points: page.spectrumPoints(page.shownView)
                         xTitle: qsTr('Wavenumber (cm⁻¹)')
-                        yTitle: page.frequencyView === 'raman' ?
+                        yTitle: page.shownView === 'raman' ?
                                     qsTr('Raman activity (rel. %)') :
                                     qsTr('IR intensity (rel. %)')
                         selectedKey: page.selectedMode
@@ -383,9 +392,13 @@ Rectangle {
                         id: modesTable
 
                         readonly property var rows: Globals.BackendWrapper.resultsModes
+                        readonly property int irWidth: Globals.BackendWrapper.resultsHasIr ? EaStyle.Sizes.fontPixelSize * 9 : 0
                         readonly property int ramanWidth: Globals.BackendWrapper.resultsHasRaman ? EaStyle.Sizes.fontPixelSize * 9 : 0
+                        // After the header labels have taken their new widths.
+                        onIrWidthChanged: Qt.callLater(relayout)
+                        onRamanWidthChanged: Qt.callLater(relayout)
 
-                        visible: page.frequencyView === 'table'
+                        visible: page.shownView === 'table'
                         width: parent.width
                         model: rows.length
                         maxRowCountShow: 14
@@ -403,7 +416,8 @@ Rectangle {
                                 text: qsTr('ν (cm⁻¹)')
                             }
                             EaComponents.TableViewLabel {
-                                width: EaStyle.Sizes.fontPixelSize * 9
+                                width: modesTable.irWidth
+                                visible: Globals.BackendWrapper.resultsHasIr
                                 horizontalAlignment: Text.AlignRight
                                 text: qsTr('IR (km/mol)')
                             }
@@ -438,7 +452,8 @@ Rectangle {
                                 text: row.imaginary ? qsTr('%1 (imaginary)').arg(row.frequencyText) : row.frequencyText
                             }
                             EaComponents.TableViewLabel {
-                                width: EaStyle.Sizes.fontPixelSize * 9
+                                width: modesTable.irWidth
+                                visible: Globals.BackendWrapper.resultsHasIr
                                 horizontalAlignment: Text.AlignRight
                                 text: row.irText
                             }
@@ -461,7 +476,7 @@ Rectangle {
                             anchors.rightMargin: EaStyle.Sizes.fontPixelSize
                             anchors.verticalCenter: parent.verticalCenter
                             wrapMode: Text.WordWrap
-                            text: page.frequencyView === 'table' ?
+                            text: page.shownView === 'table' ?
                                       qsTr('Click a row to select its mode.') :
                                       qsTr('Hover a stick for mode number, frequency and intensity; click it to select the mode.')
                         }

@@ -36,4 +36,11 @@ EaComponents.SideBarColumn {
         Loader { source: 'Groups/KPoints.qml' }
     }
 
+    // Untitled and always open: the run buttons sit last, just above Continue.
+    EaElements.GroupBox {
+        collapsible: false
+
+        Loader { source: 'Groups/Run.qml' }
+    }
+
 }

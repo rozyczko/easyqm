@@ -127,11 +127,13 @@ QtObject {
     //////////////
     // Method page
     //////////////
+    readonly property var methodEngines: activeBackend.method.engines
     readonly property string methodEngineName: activeBackend.method.engineName
     readonly property bool methodEngineFound: activeBackend.method.engineFound
     readonly property string methodEngineVersion: activeBackend.method.engineVersion
     readonly property string methodEnginePath: activeBackend.method.enginePath
     readonly property string methodEngineCardText: activeBackend.method.engineCardText
+    readonly property string methodEngineExecutableFilter: activeBackend.method.engineExecutableFilter
     function methodRedetect() { activeBackend.method.redetect() }
     function methodSetEnginePath(value) { activeBackend.method.setEnginePath(value) }
     // Whether the engine runs this kind of system (molecule or crystal), and why not
@@ -167,6 +169,9 @@ QtObject {
     readonly property string methodSolvation: activeBackend.method.solvation
     readonly property var methodSolvationChoices: activeBackend.method.solvationChoices
     function methodSetSolvation(value) { activeBackend.method.setSolvation(value) }
+    readonly property string methodOccupations: activeBackend.method.occupations
+    readonly property var methodOccupationsChoices: activeBackend.method.occupationsChoices
+    function methodSetOccupations(value) { activeBackend.method.setOccupations(value) }
 
     readonly property string methodScfConvergence: activeBackend.method.scfConvergence
     readonly property var methodScfConvergenceChoices: activeBackend.method.scfConvergenceChoices
@@ -177,6 +182,7 @@ QtObject {
     readonly property var methodIntegrationGridChoices: activeBackend.method.integrationGridChoices
     function methodSetIntegrationGrid(value) { activeBackend.method.setIntegrationGrid(value) }
     readonly property bool methodStabilityCheck: activeBackend.method.stabilityCheck
+    readonly property bool methodStabilityCheckOffered: activeBackend.method.stabilityCheckOffered
     function methodSetStabilityCheck(value) { activeBackend.method.setStabilityCheck(value) }
 
     readonly property int methodCores: activeBackend.method.cores
@@ -191,6 +197,7 @@ QtObject {
     readonly property string jobStateLabel: activeBackend.job.stateLabel
     readonly property bool jobRunning: activeBackend.job.running
     readonly property string jobMessage: activeBackend.job.message
+    readonly property var jobStepStates: activeBackend.job.stepStates  // by calculation type
     readonly property string jobFolder: activeBackend.job.folder
     readonly property string jobInputPath: activeBackend.job.inputPath
     readonly property string jobOutputPath: activeBackend.job.outputPath
@@ -209,6 +216,7 @@ QtObject {
     readonly property var resultsGeometryRows: activeBackend.results.geometryRows
     readonly property var resultsConvergenceRows: activeBackend.results.convergenceRows
     readonly property bool resultsHasFrequencies: activeBackend.results.hasFrequencies
+    readonly property bool resultsHasIr: activeBackend.results.hasIr
     readonly property bool resultsHasRaman: activeBackend.results.hasRaman
     readonly property var resultsModes: activeBackend.results.modes
 

@@ -4,7 +4,8 @@ import EasyApplication.Gui.Style as EaStyle
 import EasyApplication.Gui.Elements as EaElements
 
 
-// Coloured status badge, e.g. "● Completed". `status` is a backend ProjectStatus value.
+// Coloured status badge, e.g. "● Completed". `status` is a backend ProjectStatus value;
+// a running one is outlined and bold.
 Rectangle {
     id: pill
 
@@ -25,7 +26,9 @@ Rectangle {
     width: row.width + EaStyle.Sizes.fontPixelSize * 1.5
     height: EaStyle.Sizes.fontPixelSize * 1.6
     radius: height / 2
-    color: Qt.alpha(statusColor, 0.15)
+    color: Qt.alpha(statusColor, status === 'running' ? 0.25 : 0.15)
+    border.width: status === 'running' ? 2 : 0
+    border.color: statusColor
 
     Row {
         id: row
@@ -44,6 +47,7 @@ Rectangle {
         EaElements.Label {
             anchors.verticalCenter: parent.verticalCenter
             text: pill.text
+            font.bold: pill.status === 'running'
             color: pill.statusColor
         }
     }

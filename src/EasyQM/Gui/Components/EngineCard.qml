@@ -5,6 +5,7 @@ import EasyApplication.Gui.Elements as EaElements
 
 
 // Engine card of the Method page: name, Found / Not found pill, version line and executable path.
+// A card that cannot run the current sample is faded and says why.
 Rectangle {
     id: card
 
@@ -12,13 +13,17 @@ Rectangle {
     property bool found: false
     property string subtitle: ''
     property string path: ''
+    property string program: ''  // looked up on PATH
+    property bool active: true
+    property string problem: ''
 
     width: EaStyle.Sizes.fontPixelSize * 28
     height: column.height + EaStyle.Sizes.fontPixelSize * 2
     radius: 4
-    color: found ? Qt.alpha(EaStyle.Colors.blue, 0.06) : EaStyle.Colors.contentBackground
+    opacity: active ? 1 : 0.5
+    color: found && active ? Qt.alpha(EaStyle.Colors.blue, 0.06) : EaStyle.Colors.contentBackground
     border.width: 1
-    border.color: found ? EaStyle.Colors.blue : EaStyle.Colors.appBorder
+    border.color: found && active ? EaStyle.Colors.blue : EaStyle.Colors.appBorder
 
     Column {
         id: column
@@ -59,7 +64,15 @@ Rectangle {
             elide: Text.ElideMiddle
             font.family: EaStyle.Fonts.monoFontFamily
             color: EaStyle.Colors.themeForegroundMinor
-            text: card.path !== '' ? card.path : qsTr('orca — not on PATH')
+            text: card.path !== '' ? card.path : qsTr('%1 — not on PATH').arg(card.program)
+        }
+
+        EaElements.Label {
+            visible: card.problem !== ''
+            width: parent.width
+            wrapMode: Text.WordWrap
+            color: EaStyle.Colors.themeForegroundMinor
+            text: card.problem
         }
     }
 }

@@ -28,6 +28,7 @@ class Engine(Enum):
     ORCA = 'ORCA'
     PSI4 = 'PSI4'
     CASTEP = 'CASTEP'
+    QUANTUM_ESPRESSO = 'Quantum ESPRESSO'
 
 
 class ProjectStatus(Enum):

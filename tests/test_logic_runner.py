@@ -32,7 +32,7 @@ def test_output_goes_to_the_file_and_is_read_incrementally(tmp_path):
     output = tmp_path / 'job.out'
     script = 'import sys; print("first"); sys.stdout.flush(); print("ä second", file=sys.stderr); sys.exit(3)'
 
-    runner.start([sys.executable, '-X', 'utf8', '-c', script], tmp_path, output)
+    runner.start([[sys.executable, '-X', 'utf8', '-c', script]], tmp_path, output)
     assert _wait(runner) == 3
     text = runner.read_new() + runner.finish()
 
@@ -42,12 +42,38 @@ def test_output_goes_to_the_file_and_is_read_incrementally(tmp_path):
     assert not runner.running
 
 
+def test_programs_run_one_after_the_other_into_one_file(tmp_path):
+    runner = JobRunner()
+    output = tmp_path / 'job.out'
+    first, second = (['import time; time.sleep(0.3); print("pw")'], ['print("ph")'])
+
+    runner.start([[sys.executable, '-c', *first], [sys.executable, '-c', *second]], tmp_path, output)
+    assert runner.running
+    assert _wait(runner) == 0 and not runner.running
+    runner.finish()
+    assert output.read_text(encoding='utf-8').splitlines() == ['pw', 'ph']
+
+
+def test_a_failed_or_missing_program_ends_the_workflow(tmp_path):
+    runner = JobRunner()
+    output = tmp_path / 'job.out'
+    runner.start([[sys.executable, '-c', 'raise SystemExit(2)'], [sys.executable, '-c', 'print("ph")']], tmp_path, output)
+    assert _wait(runner) == 2
+    runner.finish()
+    assert 'ph' not in output.read_text(encoding='utf-8')
+
+    runner.start([[sys.executable, '-c', 'pass'], [str(tmp_path / 'missing.exe')]], tmp_path, output)
+    assert _wait(runner) == -1
+    runner.finish()
+    assert 'Could not start' in output.read_text(encoding='utf-8')
+
+
 def test_stop_ends_the_process(tmp_path):
     runner = JobRunner()
-    runner.start([sys.executable, '-c', 'import time; time.sleep(60)'], tmp_path, tmp_path / 'job.out')
+    runner.start([[sys.executable, '-c', 'import time; time.sleep(60)']], tmp_path, tmp_path / 'job.out')
     assert runner.running
     with pytest.raises(RuntimeError):
-        runner.start([sys.executable, '-c', 'pass'], tmp_path, tmp_path / 'other.out')
+        runner.start([[sys.executable, '-c', 'pass']], tmp_path, tmp_path / 'other.out')
 
     started = time.monotonic()
     runner.stop()

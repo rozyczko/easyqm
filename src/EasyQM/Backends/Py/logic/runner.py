@@ -3,9 +3,10 @@
 """Qt-free local job runner (GENERAL_DESIGN.md, section 4, rule 5).
 
 One engine process at a time, started in its run folder, with its standard output and error
-written straight to the output file. The GUI follows the job by reading what was appended
-to that file, so the same code shows a running job and a finished one, and nothing depends
-on the engine flushing a pipe.
+written straight to the output file. A workflow may be several programs (pw.x, then ph.x);
+each starts when the one before has ended with exit code 0, and all write to the same file.
+The GUI follows the job by reading what was appended to that file, so the same code shows a
+running job and a finished one, and nothing depends on the engine flushing a pipe.
 """
 
 import codecs
@@ -49,35 +50,30 @@ def new_run_folder(root: Path) -> Path:
 class JobRunner:
     def __init__(self):
         self._process: Optional[subprocess.Popen] = None
+        self._waiting: list[list[str]] = []  # commands still to run after the current one
+        self._launch_failed = False
+        self._folder: Optional[Path] = None
         self._output_file = None
         self._reader = None
         self._decoder = None
 
     @property
     def running(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+        return self._process is not None and (self._process.poll() is None or self._next_waits())
 
-    def start(self, command: list[str], folder: Path, output: Path) -> None:
-        """Start `command` in `folder`, writing its output to `output`.
+    def start(self, commands: list[list[str]], folder: Path, output: Path) -> None:
+        """Run `commands` one after the other in `folder`, writing their output to `output`.
 
         :raises RuntimeError: if a job is already running.
-        :raises OSError: if the program cannot be started.
+        :raises OSError: if the first program cannot be started.
         """
         if self.running:
             raise RuntimeError('A job is already running.')
         self._close()
+        self._folder, self._waiting, self._launch_failed = folder, list(commands[1:]), False
         self._output_file = open(output, 'wb')
         try:
-            self._process = subprocess.Popen(
-                command,
-                cwd=folder,
-                stdin=subprocess.DEVNULL,
-                stdout=self._output_file,
-                stderr=subprocess.STDOUT,
-                creationflags=NO_WINDOW,
-                # Own process group on POSIX, so `stop` reaches the engine's children too.
-                start_new_session=sys.platform != 'win32',
-            )
+            self._launch(commands[0])
         except OSError:
             self._close()
             raise
@@ -85,8 +81,26 @@ class JobRunner:
         self._decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
 
     def poll(self) -> Optional[int]:
-        """The exit code once the process has ended, None while it runs or before a start."""
-        return None if self._process is None else self._process.poll()
+        """The exit code once the workflow has ended, None while it runs or before a start.
+
+        Starts the next program when the current one has ended well. A program that cannot be
+        started ends the workflow with exit code -1, its error written to the output.
+        """
+        if self._process is None:
+            return None
+        if self._launch_failed:
+            return -1
+        if self._next_waits():
+            command = self._waiting.pop(0)
+            try:
+                self._launch(command)
+            except OSError as error:
+                self._waiting, self._launch_failed = [], True
+                self._output_file.write(f'\nCould not start {command[0]}: {error}\n'.encode())
+                self._output_file.flush()
+                return -1
+            return None
+        return self._process.poll()
 
     def read_new(self) -> str:
         """Text appended to the output file since the last call."""
@@ -96,7 +110,8 @@ class JobRunner:
 
     def stop(self) -> None:
         """End the engine and every process it started. Returns once it has ended."""
-        if not self.running:
+        self._waiting = []
+        if self._process is None or self._process.poll() is not None:
             return
         if sys.platform == 'win32':
             # Killing orca.exe alone would leave its orca_scf.exe etc. running.
@@ -112,6 +127,21 @@ class JobRunner:
         text = '' if self._reader is None else self._decoder.decode(self._reader.read(), final=True)
         self._close()
         return text
+
+    def _next_waits(self) -> bool:
+        return bool(self._waiting) and self._process.poll() == 0
+
+    def _launch(self, command: list[str]) -> None:
+        self._process = subprocess.Popen(
+            command,
+            cwd=self._folder,
+            stdin=subprocess.DEVNULL,
+            stdout=self._output_file,
+            stderr=subprocess.STDOUT,
+            creationflags=NO_WINDOW,
+            # Own process group on POSIX, so `stop` reaches the engine's children too.
+            start_new_session=sys.platform != 'win32',
+        )
 
     def _close(self) -> None:
         for file in (self._reader, self._output_file):

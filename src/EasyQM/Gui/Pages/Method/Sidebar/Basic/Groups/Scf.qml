@@ -32,6 +32,7 @@ Column {
     }
 
     Components.LabelledField {
+        visible: Globals.BackendWrapper.methodIntegrationGridChoices.length > 0
         text: qsTr('Integration grid:')
         Components.ChoiceComboBox {
             width: parent.width
@@ -42,6 +43,7 @@ Column {
     }
 
     EaElements.CheckBox {
+        visible: Globals.BackendWrapper.methodStabilityCheckOffered
         text: qsTr('Stability check')
         checked: Globals.BackendWrapper.methodStabilityCheck
         onToggled: Globals.BackendWrapper.methodSetStabilityCheck(checked)

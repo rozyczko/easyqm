@@ -3,6 +3,7 @@
 """Proxies of the Sample, Calculations and Method parts, and their relays in PyBackend."""
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -13,11 +14,14 @@ from PySide6.QtCore import QUrl
 
 from Backends.Py.calculations import Calculations
 from Backends.Py.job import Job
+from Backends.Py.logic.calculations import CalculationType
 from Backends.Py.logic.engines.base import Capabilities
 from Backends.Py.logic.engines.base import EngineAdapter
 from Backends.Py.logic.engines.base import EngineInfo
 from Backends.Py.logic.engines.orca import CAPABILITIES
 from Backends.Py.logic.engines.orca import OrcaAdapter
+from Backends.Py.logic.engines.quantum_espresso import CAPABILITIES as QE_CAPABILITIES
+from Backends.Py.logic.engines.quantum_espresso import QuantumEspressoAdapter
 from Backends.Py.logic.method import RunSettings
 from Backends.Py.logic.results import Results as ResultsLogic
 from Backends.Py.logic.runner import JobState
@@ -44,6 +48,18 @@ class FakeAdapter(EngineAdapter):
 
     def capabilities(self) -> Capabilities:
         return CAPABILITIES
+
+
+class FakeCrystalAdapter(FakeAdapter):
+    name = 'Quantum ESPRESSO'
+    systems = ('crystal',)
+    programs = ('pw.x', 'pw')
+
+    def capabilities(self) -> Capabilities:
+        return QE_CAPABILITIES
+
+    def default_method(self):
+        return QuantumEspressoAdapter().default_method()
 
 
 class ScriptAdapter(FakeAdapter):
@@ -362,7 +378,7 @@ def test_calculations_options(qcore_application):
 
 def test_method_engine_detection(qcore_application):
     adapter = FakeAdapter()
-    method = Method(adapter=adapter)
+    method = Method(adapters=[adapter])
     changes = _emissions(method.engineChanged)
 
     assert method.engineName == 'ORCA'
@@ -379,21 +395,21 @@ def test_method_engine_detection(qcore_application):
 
 def test_method_engine_path_is_remembered(qcore_application, tmp_path):
     adapter = FakeAdapter()
-    method = Method(adapter=adapter, settings=_settings(tmp_path))
+    method = Method(adapters=[adapter], settings=_settings(tmp_path))
     changes = _emissions(method.engineChanged)
 
     method.setEnginePath('file:///F:/ORCA/orca.exe')
 
     assert adapter.executable == 'F:/ORCA/orca.exe'
     assert len(changes) == 1
-    assert Method(adapter=FakeAdapter(), settings=_settings(tmp_path)).adapter.executable == 'F:/ORCA/orca.exe'
+    assert Method(adapters=[FakeAdapter()], settings=_settings(tmp_path)).adapter.executable == 'F:/ORCA/orca.exe'
 
     method.setEnginePath('')
     assert adapter.executable is None
 
 
 def test_method_settings(qcore_application):
-    method = Method(adapter=FakeAdapter())
+    method = Method(adapters=[FakeAdapter()])
     theory = _emissions(method.levelOfTheoryChanged)
     scf = _emissions(method.scfChanged)
     run = _emissions(method.runSettingsChanged)
@@ -410,6 +426,34 @@ def test_method_settings(qcore_application):
     assert method.scfMaxIterations == 200 and method.stabilityCheck
     assert method.cores == 4 and method.memoryGb == 16
     assert [choice['value'] for choice in method.functionalChoices][:2] == ['B3LYP', 'PBE']
+
+
+def test_method_follows_the_sample_to_the_engine_that_runs_it(qcore_application, nacl_cif):
+    method = Method(adapters=[FakeAdapter(), FakeCrystalAdapter()])
+    engine = _emissions(method.engineChanged)
+    theory = _emissions(method.levelOfTheoryChanged)
+    method.setFunctional('PBE0')
+
+    method.set_sample_cell(Sample().logic.cell)  # still a molecule: nothing switches
+    assert method.engineName == 'ORCA' and not engine
+
+    crystal = Sample()
+    crystal.loadStructure(str(nacl_cif))
+    method.set_sample_cell(crystal.logic.cell)
+
+    assert method.engineName == 'Quantum ESPRESSO' and method.canRun and len(engine) == 1
+    assert method.functional == 'PBE' and method.basisSet == 'pw' and len(theory) == 2
+    assert [choice['value'] for choice in method.functionalChoices] == ['PBE']
+    assert method.auxiliaryBasisChoices == [] and not method.stabilityCheckOffered
+    assert [(card['name'], card['active'], card['problem']) for card in method.engines] == [
+        ('ORCA', False, 'ORCA runs molecules only; this sample is periodic.'),
+        ('Quantum ESPRESSO', True, ''),
+    ]
+    assert method.engineExecutableFilter == 'Quantum ESPRESSO executable (pw.x pw.exe pw)'
+
+    method.set_sample_cell(None)  # each engine kept its own settings
+    assert method.engineName == 'ORCA' and method.functional == 'PBE0' and method.stabilityCheckOffered
+    assert method.engines[1]['problem'] == 'Quantum ESPRESSO runs crystals only; this sample is a molecule.'
 
 
 # Job
@@ -450,6 +494,21 @@ def test_job_runs_and_streams_output(qcore_application, tmp_path):
     assert ''.join(text for (text,) in appended) == job.output
     assert len(reset) == 2  # cleared at the start, complete at the end
     assert job.outputPath == str(tmp_path / 'runs' / '001' / 'job.out')
+    assert job.stepStates == {'single_point': 'completed'}
+
+
+def test_job_step_states_follow_the_output(qcore_application, tmp_path):
+    job = _job(
+        tmp_path, 'import time\nprint("energy", flush=True)\ntime.sleep(1)\nprint("frequencies")\nraise SystemExit(3)\n'
+    )
+    job._adapter.step_markers = {CalculationType.VIBRATIONAL_FREQUENCIES: re.compile('frequencies')}
+    job._calculations.set_selected(CalculationType.VIBRATIONAL_FREQUENCIES, True)
+
+    job.run()
+    assert job.stepStates == {'single_point': 'running', 'vibrational_frequencies': 'idle'}
+    _wait_for(job, qcore_application)
+
+    assert job.stepStates == {'single_point': 'completed', 'vibrational_frequencies': 'failed'}
 
 
 def test_job_fails_on_exit_code_or_missing_success_line(qcore_application, tmp_path):
@@ -472,6 +531,7 @@ def test_job_does_not_start_without_engine_or_calculation(qcore_application, tmp
     job.set_executable('')
     job.run()
     assert job.state == 'failed' and 'not found' in job.message
+    assert job.stepStates == {}  # no step ran
     assert not (tmp_path / 'runs').exists()
 
 
@@ -483,6 +543,7 @@ def test_job_stop(qcore_application, tmp_path):
     job.stop()
 
     assert job.state == 'stopped' and job.message.startswith('Stopped after ')
+    assert job.stepStates == {'single_point': 'stopped'}
     assert not job.running
 
 
@@ -507,8 +568,9 @@ def test_backend_relays_the_cell_to_the_method_part(backend, nacl_cif):
     backend.sample.loadStructure(str(nacl_cif))
 
     assert backend.project.sampleName == 'ClNa, 8 atoms'
-    assert backend.method.periodic and not backend.method.canRun
-    assert backend.method.cannotRunReason == 'ORCA runs molecules only; this sample is periodic.'
+    assert backend.method.periodic and backend.method.canRun and backend.method.cannotRunReason == ''
+    assert backend.method.engineName == backend.project.engine == 'Quantum ESPRESSO'
+    assert backend.job._adapter is backend.method.adapter  # the next job runs on it
     assert backend.method.kpointGrid == [2, 2, 2]
 
     backend.method.setKpointGrid(3, 3, 1)
@@ -592,6 +654,25 @@ def test_results_offer_only_what_was_found(qcore_application):
 
     results.set_results(ResultsLogic())
     assert not results.available and results.placeholder.startswith('The output of the last job holds no results')
+
+
+def test_results_of_a_crystal_show_the_band_gap_or_the_fermi_energy(qcore_application):
+    results = Results()
+    results.set_results(ResultsLogic(final_energy=-45.6, homo=6.2527, lumo=6.9439, crystal=True))
+    assert results.tiles[1] == {
+        'title': 'Band gap (eV)',
+        'value': '0.69',
+        'detail': 'VBM 6.25 · CBM 6.94 · on the k-point grid',
+        'tone': '',
+    }
+
+    results.set_results(ResultsLogic(final_energy=-45.6, fermi_energy=-0.5, crystal=True))
+    assert results.tiles[1] == {
+        'title': 'Fermi energy (eV)',
+        'value': '−0.50',
+        'detail': 'metallic on the k-point grid',
+        'tone': '',
+    }
 
 
 def test_results_of_an_optimisation_with_frequencies(qcore_application):

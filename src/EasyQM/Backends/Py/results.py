@@ -89,9 +89,15 @@ class Results(QObject):
             if frequencies.zero_point_energy is not None:
                 detail += f' · ZPE {frequencies.zero_point_energy * HARTREE_TO_KCAL_PER_MOL:.1f}{_KCAL_PER_MOL}'
             tiles.append(_tile('Imaginary modes', str(count), detail, '' if count == 0 else 'warning'))
-        if results.gap is not None:
+        if results.gap is not None and not results.crystal:
             detail = f'HOMO {_number(results.homo, ".2f")} · LUMO {_number(results.lumo, ".2f")}'
             tiles.append(_tile('HOMO–LUMO gap (eV)', f'{results.gap:.2f}', detail))
+        elif results.gap is not None:
+            # From the SCF k-points only, so a band edge between them is missed.
+            detail = f'VBM {_number(results.homo, ".2f")} · CBM {_number(results.lumo, ".2f")} · on the k-point grid'
+            tiles.append(_tile('Band gap (eV)', f'{results.gap:.2f}', detail))
+        elif results.fermi_energy is not None:
+            tiles.append(_tile('Fermi energy (eV)', _number(results.fermi_energy, '.2f'), 'metallic on the k-point grid'))
         if results.dipole is not None:
             where = 'at the final geometry' if optimisation is not None else 'at the input geometry'
             tiles.append(_tile('Dipole moment (D)', f'{results.dipole:.3f}', where))
@@ -153,6 +159,11 @@ class Results(QObject):
     @Property(bool, notify=resultsChanged)
     def hasFrequencies(self) -> bool:
         return self._results.frequencies is not None
+
+    @Property(bool, notify=resultsChanged)
+    def hasIr(self) -> bool:
+        frequencies = self._results.frequencies
+        return frequencies is not None and frequencies.has_ir
 
     @Property(bool, notify=resultsChanged)
     def hasRaman(self) -> bool:

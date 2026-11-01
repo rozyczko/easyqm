@@ -53,7 +53,9 @@ Column {
         }
     }
 
+    // Rows the active engine has no choices for are hidden.
     Components.LabelledField {
+        visible: Globals.BackendWrapper.methodAuxiliaryBasisChoices.length > 0
         text: qsTr('Auxiliary basis:')
         Components.ChoiceComboBox {
             width: parent.width

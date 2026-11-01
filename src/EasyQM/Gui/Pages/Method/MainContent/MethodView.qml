@@ -10,16 +10,12 @@ import Gui.Globals as Globals
 
 
 // Engine card and the Run card: one engine (ORCA), run locally and serially, with the
-// engine output followed live in the log view.
+// engine output followed live in the log view. Run workflow and Stop are in the sidebar.
 Rectangle {
     id: page
 
     readonly property int commonSpacing: EaStyle.Sizes.fontPixelSize * 1.5
     readonly property int contentWidth: width - 2 * commonSpacing
-    readonly property bool canRun: Globals.BackendWrapper.methodEngineFound &&
-                                   Globals.BackendWrapper.methodCanRun &&
-                                   Globals.BackendWrapper.calculationsSelectedCount > 0 &&
-                                   !Globals.BackendWrapper.jobRunning
 
     color: EaStyle.Colors.mainContentBackground
 
@@ -72,14 +68,27 @@ Rectangle {
             }
         }
 
-        Components.EngineCard {
-            name: Globals.BackendWrapper.methodEngineName
-            found: Globals.BackendWrapper.methodEngineFound
-            subtitle: Globals.BackendWrapper.methodEngineCardText
-            path: Globals.BackendWrapper.methodEnginePath
+        // One card per engine; the one that runs the sample is active, the buttons above act on it.
+        Flow {
+            width: parent.width
+            spacing: commonSpacing
+
+            Repeater {
+                model: Globals.BackendWrapper.methodEngines
+
+                Components.EngineCard {
+                    name: modelData.name
+                    found: modelData.found
+                    subtitle: modelData.text
+                    path: modelData.path
+                    program: modelData.program
+                    active: modelData.active
+                    problem: modelData.problem
+                }
+            }
         }
 
-        // ORCA and a crystal
+        // No engine runs this sample
         EaElements.Label {
             visible: !Globals.BackendWrapper.methodCanRun
             color: EaStyle.Colors.red
@@ -164,27 +173,10 @@ Rectangle {
                 color: EaStyle.Colors.themeForegroundMinor
                 text: 'GB'
             }
-
-            Item { width: EaStyle.Sizes.fontPixelSize * 2; height: 1 }
-
-            EaElements.SideBarButton {
-                width: EaStyle.Sizes.fontPixelSize * 11
-                fontIcon: 'play-circle'
-                text: qsTr('Run workflow')
-                enabled: page.canRun
-                onClicked: Globals.BackendWrapper.jobRun()
-            }
-            EaElements.SideBarButton {
-                width: EaStyle.Sizes.fontPixelSize * 7
-                fontIcon: 'stop'
-                text: qsTr('Stop')
-                enabled: Globals.BackendWrapper.jobRunning
-                onClicked: Globals.BackendWrapper.jobStop()
-            }
         }
 
-        // Step strip: the workflow from the Calculations page. All steps run in one engine
-        // process, so they share the job state.
+        // Step strip: the workflow from the Calculations page, each step in its state in the
+        // job that runs or ran last; the running one stands out, a failed one is red.
         Row {
             spacing: EaStyle.Sizes.fontPixelSize
 
@@ -202,7 +194,7 @@ Rectangle {
                         text: 'arrow-right'
                     }
                     Components.StatusPill {
-                        status: Globals.BackendWrapper.jobState === 'idle' ? 'new' : Globals.BackendWrapper.jobState
+                        status: Globals.BackendWrapper.jobStepStates[modelData.type] ?? 'new'
                         text: `${modelData.step} · ${modelData.label}`
                     }
                 }
@@ -291,7 +283,7 @@ Rectangle {
     FileDialog {
         id: engineFileDialog
         title: qsTr('Choose the %1 executable').arg(Globals.BackendWrapper.methodEngineName)
-        nameFilters: [qsTr('ORCA executable (orca orca.exe)'), qsTr('All files (*)')]
+        nameFilters: [Globals.BackendWrapper.methodEngineExecutableFilter, qsTr('All files (*)')]
         onAccepted: Globals.BackendWrapper.methodSetEnginePath(selectedFile)
     }
 }

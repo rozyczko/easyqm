@@ -41,7 +41,20 @@ Column {
         }
     }
 
+    // Insulators need fixed occupations for their phonons; metals need smearing.
     Components.LabelledField {
+        visible: Globals.BackendWrapper.methodOccupationsChoices.length > 0
+        text: qsTr('Occupations:')
+        Components.ChoiceComboBox {
+            width: parent.width
+            choices: Globals.BackendWrapper.methodOccupationsChoices
+            value: Globals.BackendWrapper.methodOccupations
+            onSelected: (value) => Globals.BackendWrapper.methodSetOccupations(value)
+        }
+    }
+
+    Components.LabelledField {
+        visible: Globals.BackendWrapper.methodSolvationChoices.length > 0
         text: qsTr('Solvation:')
         Components.ChoiceComboBox {
             width: parent.width
