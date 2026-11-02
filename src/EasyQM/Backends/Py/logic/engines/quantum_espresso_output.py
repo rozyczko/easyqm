@@ -21,6 +21,7 @@ from ..results import Mode
 from ..results import Optimisation
 from ..results import Results
 from ..sample import Atom
+from ..sample import Cell
 from .parsing import NUMBER
 from .parsing import block
 from .parsing import last_float
@@ -35,6 +36,8 @@ _ELECTRONS = re.compile(rf'number of electrons\s+=\s+({NUMBER})(?:\s+\(up:\s+({N
 _ALAT = re.compile(rf'lattice parameter \(alat\)\s+=\s+({NUMBER})\s+a\.u\.')
 _SITE = re.compile(rf'^\s+\d+\s+([A-Z][a-z]?)\S*\s+tau\(\s*\d+\)\s+=\s+\(\s*({NUMBER})\s*({NUMBER})\s*({NUMBER})')
 _POSITION = re.compile(rf'^([A-Z][a-z]?)\S*\s+({NUMBER})\s+({NUMBER})\s+({NUMBER})')
+_CELL = re.compile(rf'^CELL_PARAMETERS \((angstrom|bohr|alat=\s*{NUMBER})\)')
+_VECTOR = re.compile(rf'^\s*({NUMBER})\s+({NUMBER})\s+({NUMBER})\s*$')
 _KPOINT = re.compile(r'^.*bands \(ev\):.*$', re.MULTILINE)
 _BANDS_END = re.compile(r'the (?:spin up/dw )?Fermi energ|highest occupied|^!', re.MULTILINE)
 _MODE = re.compile(rf'^\s*(\d+)\s+({NUMBER})\s+{NUMBER}(?:\s+({NUMBER}))?')
@@ -126,7 +129,26 @@ def _optimisation(output: str, energies: list[float]) -> Optional[Optimisation]:
         energies=energies,
         initial=_initial_atoms(output, lines),
         final=final,
+        final_cell=_final_cell(lines),
     )
+
+
+def _final_cell(lines: list[str]) -> Optional[Cell]:
+    """The cell of the last vc-relax step; a relax at fixed cell prints none."""
+    headers = [match for line in lines if (match := _CELL.match(line))]
+    if not headers:
+        return None
+    unit = headers[-1].group(1)
+    if unit == 'angstrom':
+        scale = 1.0
+    elif unit == 'bohr':
+        scale = ANGSTROM_PER_BOHR
+    else:
+        scale = float(unit.split('=')[1]) * ANGSTROM_PER_BOHR
+    rows = block(lines, _CELL.pattern, _VECTOR)
+    if len(rows) != 3:
+        return None  # stopped while printing it
+    return Cell(tuple(tuple(float(value) * scale for value in row.groups()) for row in rows))
 
 
 def _initial_atoms(output: str, lines: list[str]) -> list[Atom]:

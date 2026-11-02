@@ -13,6 +13,7 @@ from typing import Optional
 from .geometry import angle
 from .geometry import distance
 from .sample import Atom
+from .sample import Cell
 from .sample import find_bonds
 
 HARTREE_TO_KCAL_PER_MOL = 627.509474
@@ -36,6 +37,7 @@ class Optimisation:
     initial: list[Atom]
     final: list[Atom]
     criteria: list[Criterion] = field(default_factory=list)  # of the last cycle
+    final_cell: Optional[Cell] = None  # when the optimiser also changed the cell
 
     @property
     def energy_change(self) -> Optional[float]:

@@ -241,6 +241,25 @@ class Sample(QObject):
         self.selectionChanged.emit()
         self.externalSampleChanged.emit()
 
+    def apply_optimisation(self, optimisation) -> bool:
+        """Move the atoms, and a crystal's cell, to the geometry an optimisation ended at.
+
+        Only if the optimisation started from the structure shown: one loaded while the job ran
+        is left alone. The selection and the view settings stay.
+        """
+        if not self._logic.at_positions(optimisation.initial):
+            return False
+        try:
+            self._logic.move_atoms(optimisation.final, optimisation.final_cell)
+        except ValueError:
+            return False
+        self._scene = None
+        self.sampleChanged.emit()
+        self.atomsChanged.emit()
+        self.selectionChanged.emit()
+        self.externalSampleChanged.emit()
+        return True
+
     # Selection
 
     @Slot(int, str)

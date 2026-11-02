@@ -8,6 +8,7 @@ from conftest import NACL_CIF
 
 from Backends.Py.logic.elements import COVALENT_RADII
 from Backends.Py.logic.elements import SYMBOLS
+from Backends.Py.logic.sample import Atom
 from Backends.Py.logic.sample import Cell
 from Backends.Py.logic.sample import Sample
 from Backends.Py.logic.sample import find_bonds
@@ -211,6 +212,46 @@ def test_cif_is_expanded_and_wrapped(nacl_cif):
     assert all(-1e-12 < value < 1 for position in fractional for value in position)
     assert fractional[5] == pytest.approx((0.5, 0.0, 0.0))
     assert sample.charge == 0 and sample.multiplicity == 1
+
+
+def _shifted(atoms: list[Atom], dx: float) -> list[Atom]:
+    """Copies along x, as a parser gives them: new labels, nothing fixed."""
+    return [Atom(f'X{i}', atom.element, atom.x + dx, atom.y, atom.z) for i, atom in enumerate(atoms)]
+
+
+def test_move_atoms_keeps_labels_and_fixed_flags():
+    sample = Sample.benzene()
+    sample.atoms[0].fixed = True
+    x = [atom.x for atom in sample.atoms]
+    assert sample.at_positions(_shifted(sample.atoms, 0.0005))
+    assert not sample.at_positions(_shifted(sample.atoms, 0.01))
+    assert not sample.at_positions(_shifted(sample.atoms[:-1], 0.0))
+
+    sample.move_atoms(_shifted(sample.atoms, 0.1))
+
+    assert [atom.x for atom in sample.atoms] == pytest.approx([value + 0.1 for value in x])
+    assert sample.atoms[0].label == 'C1' and sample.atoms[0].fixed and sample.cell is None
+
+
+def test_move_atoms_refuses_other_atoms():
+    sample = Sample.benzene()
+    other = _shifted(sample.atoms, 0.1)
+    other[0].element = 'N'
+
+    with pytest.raises(ValueError, match='other atoms'):
+        sample.move_atoms(other)
+    assert sample.at_positions(_shifted(sample.atoms, 0.0))
+
+
+def test_move_atoms_of_a_crystal_takes_the_new_cell_and_wraps(nacl_cif):
+    sample = Sample()
+    sample.load(nacl_cif)
+    cell = Cell(((5.7, 0.0, 0.0), (0.0, 5.7, 0.0), (0.0, 0.0, 5.7)))
+
+    sample.move_atoms(_shifted(sample.atoms, -0.01), cell)
+
+    assert sample.cell.lengths == (5.7, 5.7, 5.7) and sample.cell.space_group == 'Fm-3m'
+    assert sample.atoms[0].x == pytest.approx(5.69)  # Na1 left the cell at the origin
 
 
 def test_crystal_formula_and_summary(nacl_cif):

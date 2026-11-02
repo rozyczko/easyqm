@@ -99,8 +99,13 @@ class PyBackend(QObject):
 
     def _relay_results(self) -> None:
         # A starting job invalidates the shown results; an ended one, even failed or stopped,
-        # shows whatever its output holds.
+        # shows whatever its output holds. A converged optimisation also moves the sample to
+        # its final geometry, so the next job starts from there.
         if self._job.state == 'running':
             self._results.clear(describe(self._method.logic, self._method.adapter.capabilities()))
         elif self._job.state != 'idle':
-            self._results.set_results(self._job.adapter.parse(self._job.output))
+            results = self._job.adapter.parse(self._job.output)
+            self._results.set_results(results)
+            optimisation = results.optimisation
+            if self._job.state == 'completed' and optimisation is not None and optimisation.converged:
+                self._sample.apply_optimisation(optimisation)

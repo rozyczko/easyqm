@@ -729,3 +729,54 @@ def test_backend_parses_the_output_when_the_job_ends(backend):
     assert backend.results.available
     assert backend.results.tiles[0]['detail'] == 'B3LYP-D3(BJ)/def2-TZVP'
     assert backend.results.hasOptimisation and backend.results.hasFrequencies
+
+
+def _load_water(backend, tmp_path) -> None:
+    """Water at the start geometry of the optimisation in WATER."""
+    water = tmp_path / 'water.xyz'
+    water.write_text('3\n\nO 0 0 0.117\nH 0 0.757 -0.468\nH 0 -0.757 -0.468\n', encoding='utf-8')
+    backend.sample.loadStructure(str(water))
+
+
+def _positions(sample: Sample) -> list:
+    return [(atom.x, atom.y, atom.z) for atom in sample.logic.atoms]
+
+
+def test_backend_moves_the_sample_to_a_converged_optimisation(backend, tmp_path):
+    _load_water(backend, tmp_path)
+    backend.sample.setAtomFixed(0, True)
+    backend.sample.selectAtom(1, 'only')
+    scene = _emissions(backend.sample.sceneChanged)
+    relayed = _emissions(backend.sample.externalSampleChanged)
+
+    backend.job._chunks = [WATER.read_text(encoding='utf-8')]
+    backend.job._set_state(JobState.COMPLETED, '')
+
+    assert _positions(backend.sample) == [(0.0, 0.0, 0.12), (0.0, 0.76, -0.47), (0.0, -0.76, -0.47)]
+    assert backend.sample.logic.atoms[0].fixed and backend.sample.selectedAtoms == [1]
+    assert scene and len(relayed) == 1
+    # The results still compare the start geometry with the final one.
+    assert backend.results.geometryRows[0]['bondInitial'] == '0.9567'
+
+    backend.job._set_state(JobState.COMPLETED, '')  # the sample has moved on: no second move
+    assert len(relayed) == 1
+
+
+@pytest.mark.parametrize('state', [JobState.FAILED, JobState.STOPPED])
+def test_backend_keeps_the_sample_after_an_unfinished_job(backend, tmp_path, state):
+    _load_water(backend, tmp_path)
+    before = _positions(backend.sample)
+
+    backend.job._chunks = [WATER.read_text(encoding='utf-8')]
+    backend.job._set_state(state, '')
+
+    assert _positions(backend.sample) == before
+
+
+def test_backend_keeps_a_structure_loaded_during_the_job(backend):
+    before = _positions(backend.sample)  # benzene, not the water the job optimised
+
+    backend.job._chunks = [WATER.read_text(encoding='utf-8')]
+    backend.job._set_state(JobState.COMPLETED, '')
+
+    assert _positions(backend.sample) == before

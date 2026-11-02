@@ -324,6 +324,21 @@ def test_reads_a_relaxation():
     assert len(optimisation.initial) == len(optimisation.final) == 8
     assert optimisation.initial[0].label == 'Si1' and optimisation.initial[0].x == pytest.approx(0.75886, abs=1e-4)
     assert (optimisation.final[0].x, optimisation.final[0].y) == (0.7046100345, 0.6788625)
+    assert optimisation.final_cell is None  # relax keeps the cell
+
+
+@pytest.mark.parametrize(
+    'unit, scale',
+    [('angstrom', 1.0), ('bohr', 0.529177210544), ('alat= 10.26290000', 10.2629 * 0.529177210544)],
+)
+def test_reads_the_cell_of_a_variable_cell_relaxation(unit, scale):
+    cell = f'CELL_PARAMETERS ({unit})\n   1.01 0.0 0.0\n   0.0 1.01 0.0\n   0.0 0.0 0.99\n\n'
+    output = SI_RELAX.read_text(encoding='utf-8').replace('Begin final coordinates\n', f'Begin final coordinates\n{cell}')
+
+    optimisation = QuantumEspressoAdapter().parse(output).optimisation
+
+    assert optimisation.final_cell.lengths == pytest.approx((1.01 * scale, 1.01 * scale, 0.99 * scale))
+    assert len(optimisation.final) == 8
 
 
 def test_reads_gamma_phonons_after_the_ground_state():

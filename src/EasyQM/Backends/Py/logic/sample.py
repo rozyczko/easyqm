@@ -30,6 +30,7 @@ STRUCTURES_DIR = Path(__file__).resolve().parents[3] / 'Resources' / 'structures
 _BOND_TOLERANCE = 1.2
 _WRAP_TOLERANCE = 1e-6  # a fractional coordinate this close to 0 or 1 is 0
 _OCCUPANCY_TOLERANCE = 1e-3
+_SAME_POSITION = 1e-3  # Å; engines echo the input positions rounded
 _LATTICE = re.compile(r'Lattice\s*=\s*"([^"]*)"', re.IGNORECASE)
 _PBC = re.compile(r'pbc\s*=\s*"([^"]*)"', re.IGNORECASE)
 
@@ -184,6 +185,30 @@ class Sample:
         self.charge = 0
         electrons = sum(atomic_number(atom.element) for atom in atoms)
         self.multiplicity = 1 + electrons % 2
+
+    # Geometry from a calculation
+
+    def at_positions(self, atoms: list[Atom]) -> bool:
+        """Whether `atoms` are the sample's atoms, in the same order and at the same positions."""
+        return len(atoms) == len(self.atoms) and all(
+            new.element == atom.element and distance(new, atom) < _SAME_POSITION
+            for atom, new in zip(self.atoms, atoms)
+        )
+
+    def move_atoms(self, atoms: list[Atom], cell: Optional[Cell] = None) -> None:
+        """Move the atoms to the positions of `atoms`, the same atoms in the same order, and give
+        a crystal the new `cell` if there is one. Labels and fixed flags are kept.
+
+        :raises ValueError: if `atoms` are other atoms. The sample is unchanged in that case.
+        """
+        if [new.element for new in atoms] != [atom.element for atom in self.atoms]:
+            raise ValueError('The new positions are for other atoms.')
+        if cell is not None and self.cell is not None:
+            self.cell = Cell(cell.vectors, self.cell.space_group)
+        for atom, new in zip(self.atoms, atoms):
+            atom.x, atom.y, atom.z = new.x, new.y, new.z
+        if self.cell is not None:
+            _wrap(self.atoms, self.cell)
 
 
 def read_xyz(text: str) -> tuple[list[Atom], Optional[Cell]]:
