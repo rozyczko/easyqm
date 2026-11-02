@@ -242,6 +242,17 @@ class Sample:
             self.cell = Cell(self.cell.vectors)
             _wrap([atom], self.cell)
 
+    def set_positions(self, positions: list[Vec]) -> None:
+        """Put every atom at its Cartesian position in Å, given in atom order (e.g. from an
+        edited Z-matrix). A crystal's atoms are wrapped into the cell."""
+        if len(positions) != len(self.atoms):
+            raise ValueError(f'{len(positions)} positions for {len(self.atoms)} atoms.')
+        for atom, position in zip(self.atoms, positions):
+            atom.x, atom.y, atom.z = position
+        if self.cell is not None:
+            self.cell = Cell(self.cell.vectors)
+            _wrap(self.atoms, self.cell)
+
     def set_cell_parameters(self, a, b, c, alpha, beta, gamma) -> None:
         """Give a crystal a cell of these lengths (Å) and angles (°). The atoms keep their
         fractional coordinates; the cell keeps its orientation (`Cell.with_parameters`).

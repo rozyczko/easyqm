@@ -8,8 +8,8 @@ import Gui.Components as Components
 import Gui.Globals as Globals
 
 
-// What the viewer shows. Cell, boundary atoms, repeat and fractional coordinates apply to
-// crystals only.
+// What the viewer and the Atoms table show. Cell, boundary atoms, repeat and fractional
+// coordinates apply to crystals only, the Z-matrix to molecules only.
 Column {
     spacing: EaStyle.Sizes.fontPixelSize
 
@@ -78,12 +78,15 @@ Column {
         text: qsTr('Cells along a × b × c; at most %1 atoms are drawn.').arg(Globals.BackendWrapper.sampleSceneAtomLimit)
     }
 
+    // What the Atoms table shows: a molecule's Z-matrix or a crystal's fractional coordinates.
     Components.LabelledField {
         text: qsTr('Coordinates:')
-        enabled: periodic
         Components.ChoiceComboBox {
             width: parent.width
-            choices: [{ value: 'cartesian', label: qsTr('Cartesian (Å)') }, { value: 'fractional', label: qsTr('Fractional') }]
+            choices: [
+                { value: 'cartesian', label: qsTr('Cartesian (Å)') },
+                periodic ? { value: 'fractional', label: qsTr('Fractional') } : { value: 'zmatrix', label: qsTr('Z-matrix (Å, °)') }
+            ]
             value: Globals.BackendWrapper.sampleCoordinates
             onSelected: (value) => Globals.BackendWrapper.sampleSetCoordinates(value)
         }

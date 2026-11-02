@@ -24,6 +24,7 @@ requires-python = '>=3.12'
 dependencies = [
   'EasyApplication', # Qt/QML components for building graphical applications
   'gemmi',           # Reading and parsing CIF files
+  'chemcoord',       # Z-matrix <-> Cartesian conversion for molecules
 ]
 
 [project.optional-dependencies]

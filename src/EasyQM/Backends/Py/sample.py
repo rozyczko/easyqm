@@ -18,8 +18,11 @@ from .logic.scene import Image
 from .logic.scene import Scene
 from .logic.scene import build_scene
 from .logic.scene import place
+from .logic.zmatrix import FIELDS as ZMATRIX_FIELDS
+from .logic.zmatrix import ZMatrix
 
 _COORDINATE_DECIMALS = 4
+_ANGLE_DECIMALS = 2
 _SELECTION_LABELS_SHOWN = 4
 _REPEAT_MAX = 4
 _CELL_PARAMETERS = ('a', 'b', 'c', 'alpha', 'beta', 'gamma')
@@ -41,6 +44,8 @@ class Sample(QObject):
     sceneChanged = Signal()
     # Display settings: repeat, boundary atoms, coordinates in the tables.
     viewChanged = Signal()
+    # The Z-matrix rows: the structure or the coordinates shown changed.
+    zmatrixChanged = Signal()
     loadError = Signal(str)
 
     # For the other backend parts.
@@ -58,6 +63,12 @@ class Sample(QObject):
         self._boundary_atoms = True
         self._coordinates = self._default_coordinates()
         self._scene: Optional[Scene] = None  # built on first read
+        # Built on first read in 'zmatrix' mode; the construction (which atoms place which)
+        # is kept from one Z-matrix to the next, so rows do not reorder while atoms move.
+        self._zmatrix: Optional[ZMatrix] = None
+        self._zmatrix_error = ''
+        self._zmatrix_stale = True
+        self._construction = None
         self.atomsChanged.connect(self.sceneChanged)
 
     @property
@@ -222,8 +233,39 @@ class Sample(QObject):
 
     @Property(str, notify=viewChanged)
     def coordinates(self) -> str:
-        """'cartesian' or 'fractional': how the tables show positions."""
+        """How the tables show positions: 'cartesian'; 'fractional' for a crystal, 'zmatrix'
+        for a molecule."""
         return self._coordinates
+
+    # Z-matrix of a molecule (logic/zmatrix.py)
+
+    @Property('QVariantList', notify=zmatrixChanged)
+    def zmatrix(self) -> list:
+        """Rows in construction order while the tables show the Z-matrix, empty otherwise:
+        [{atom, label, element, bondTo, bond, angleTo, angle, dihedralTo, dihedral}]. `atom`
+        indexes `atoms`; a reference is the label of the atom the value is measured to, '' where
+        chemcoord measures it to the origin or an axis (the first three rows)."""
+        zmatrix = self._current_zmatrix()
+        if zmatrix is None:
+            return []
+        atoms = self._logic.atoms
+        rows = []
+        for row in zmatrix.rows:
+            entry = {'atom': row.atom, 'label': atoms[row.atom].label, 'element': atoms[row.atom].element}
+            for field, reference, value in zip(ZMATRIX_FIELDS, row.references, row.values):
+                decimals = _COORDINATE_DECIMALS if field == 'bond' else _ANGLE_DECIMALS
+                entry[f'{field}To'] = '' if reference is None else atoms[reference].label
+                entry[field] = round(value, decimals) + 0.0
+            rows.append(entry)
+        return rows
+
+    @Property(str, notify=zmatrixChanged)
+    def zmatrixError(self) -> str:
+        """Why there is no Z-matrix to show ('No Z-matrix: the molecule is linear, …'); empty
+        when there is one, or when the tables show other coordinates."""
+        if self._coordinates != 'zmatrix' or self._current_zmatrix() is not None:
+            return ''
+        return self._zmatrix_error
 
     # Input
 
@@ -239,6 +281,7 @@ class Sample(QObject):
         self._selected, self._anchor = [], None
         self._repeat = (1, 1, 1)
         self._coordinates = self._default_coordinates()
+        self._construction = None  # of other atoms
         self.viewChanged.emit()
         self._structure_changed()
         self.structureLoaded.emit()
@@ -295,12 +338,31 @@ class Sample(QObject):
             return
         self._structure_changed()
 
+    @Slot(int, str, str)
+    def setZmatrixValue(self, atom: int, field: str, text: str) -> None:
+        """Set the 'bond' (Å), 'angle' or 'dihedral' (°) of an atom in the Z-matrix: the atom
+        moves, and with it the atoms placed from it."""
+        value = _number(text)
+        zmatrix = self._current_zmatrix()
+        if value is None or zmatrix is None or field not in ZMATRIX_FIELDS:
+            return
+        try:
+            if math.isclose(zmatrix.row(atom).value(field), value, abs_tol=_UNCHANGED):
+                return
+            positions = zmatrix.positions_with(atom, field, value)
+        except (KeyError, ValueError):
+            return
+        self._logic.set_positions(positions)
+        self._structure_changed()
+
     def _structure_changed(self) -> None:
         """The atoms or the cell changed: everything shown from them is out of date. The
         selection keeps its atoms, so measurements follow them."""
         self._scene = None
+        self._zmatrix_stale = True
         self.sampleChanged.emit()
         self.atomsChanged.emit()
+        self.zmatrixChanged.emit()
         self.selectionChanged.emit()
         self.externalSampleChanged.emit()
 
@@ -312,13 +374,15 @@ class Sample(QObject):
 
         'only' (click): this atom alone. 'toggle' (Ctrl-click): add it, or take it out if
         selected. 'range' (Shift-click): the atoms from the last 'only' or 'toggle' atom to
-        this one, in index order, replacing the selection. Table rows are the atoms in their
+        this one, in the order of the table rows, replacing the selection. Table rows are the atoms in their
         own cell (image (0, 0, 0)).
         """
         if mode == 'range':
-            anchor = self._anchor if self._anchor is not None else index
-            step = 1 if index >= anchor else -1
-            self._set_selected([(i, HOME) for i in range(anchor, index + step, step)])
+            order = self._table_order()
+            start = order.index(self._anchor if self._anchor is not None else index)
+            end = order.index(index)
+            step = 1 if end >= start else -1
+            self._set_selected([(order[row], HOME) for row in range(start, end + step, step)])
         else:
             self._pick((index, HOME), mode)
 
@@ -381,9 +445,12 @@ class Sample(QObject):
 
     @Slot(str)
     def setCoordinates(self, value: str) -> None:
-        if value in ('cartesian', 'fractional') and value != self._coordinates:
+        """'cartesian'; 'fractional' for a crystal; 'zmatrix' for a molecule."""
+        allowed = ('cartesian', 'fractional') if self._logic.periodic else ('cartesian', 'zmatrix')
+        if value in allowed and value != self._coordinates:
             self._coordinates = value
             self.viewChanged.emit()
+            self.zmatrixChanged.emit()
 
     # Scene
 
@@ -401,6 +468,27 @@ class Sample(QObject):
 
     def _default_coordinates(self) -> str:
         return 'fractional' if self._logic.periodic else 'cartesian'
+
+    # Z-matrix
+
+    def _current_zmatrix(self) -> Optional[ZMatrix]:
+        """The Z-matrix of the current atoms while the tables show it; None otherwise, or when
+        there is none (`_zmatrix_error` says why)."""
+        if self._coordinates != 'zmatrix':
+            return None
+        if self._zmatrix_stale:
+            self._zmatrix_stale = False
+            try:
+                self._zmatrix, self._zmatrix_error = ZMatrix(self._logic.atoms, self._construction), ''
+                self._construction = self._zmatrix.construction
+            except ValueError as error:
+                self._zmatrix, self._zmatrix_error = None, str(error)
+        return self._zmatrix
+
+    def _table_order(self) -> list[int]:
+        """Atom indices in the order of the table rows: construction order for the Z-matrix."""
+        zmatrix = self._current_zmatrix()
+        return [row.atom for row in zmatrix.rows] if zmatrix is not None else list(range(self._logic.atom_count))
 
 
 def _rounded(values) -> list:

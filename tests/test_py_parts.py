@@ -370,6 +370,95 @@ def test_sample_edits_fractional_coordinates_and_the_cell(qcore_application, nac
     assert len(changes) == 4 and sample.cell['a'] == 6.0
 
 
+def test_sample_shows_a_zmatrix_for_molecules_only(qcore_application, nacl_cif):
+    sample = Sample()
+    assert sample.zmatrix == [] and sample.zmatrixError == ''
+    changes = _emissions(sample.zmatrixChanged)
+
+    sample.setCoordinates('zmatrix')
+
+    rows = sample.zmatrix
+    assert sample.coordinates == 'zmatrix' and changes and len(rows) == 12
+    assert sorted(row['atom'] for row in rows) == list(range(12))
+    assert (rows[0]['bondTo'], rows[0]['angleTo'], rows[0]['dihedralTo']) == ('', '', '')
+    assert rows[1]['bondTo'] == rows[0]['label'] and rows[1]['angleTo'] == ''
+    assert rows[2]['angleTo'] != '' and rows[2]['dihedralTo'] == ''
+    assert all(row['dihedralTo'] for row in rows[3:])
+    assert rows[1]['bond'] == pytest.approx(1.3915, abs=1e-3) and set(rows[1]) == {
+        'atom', 'label', 'element', 'bondTo', 'bond', 'angleTo', 'angle', 'dihedralTo', 'dihedral'
+    }  # fmt: skip
+
+    sample.setCoordinates('fractional')  # a molecule has none
+    assert sample.coordinates == 'zmatrix'
+
+    sample.loadStructure(str(nacl_cif))
+    sample.setCoordinates('zmatrix')  # a crystal has none
+    assert sample.coordinates == 'fractional' and sample.zmatrix == []
+
+
+def test_sample_edits_the_zmatrix(qcore_application):
+    from Backends.Py.logic.geometry import distance
+
+    sample = Sample()
+    sample.setCoordinates('zmatrix')
+    rows = sample.zmatrix
+    hydrogen = next(row for row in rows if row['element'] == 'H')
+    bonded = next(i for i, atom in enumerate(sample.atoms) if atom['label'] == hydrogen['bondTo'])
+    changes = [_emissions(signal) for signal in (sample.zmatrixChanged, sample.sceneChanged, sample.externalSampleChanged)]
+
+    sample.setZmatrixValue(hydrogen['atom'], 'bond', '1,2')
+
+    atoms = sample.logic.atoms
+    assert distance(atoms[hydrogen['atom']], atoms[bonded]) == pytest.approx(1.2)
+    after = sample.zmatrix
+    assert [row['atom'] for row in after] == [row['atom'] for row in rows]  # same construction
+    assert next(row for row in after if row['atom'] == hydrogen['atom'])['bond'] == 1.2
+    assert all(len(emitted) == 1 for emitted in changes)
+
+    for atom, field, text in (
+        (hydrogen['atom'], 'bond', '1.2'),  # unchanged
+        (hydrogen['atom'], 'bond', '-1'),  # out of range
+        (hydrogen['atom'], 'angle', 'abc'),
+        (hydrogen['atom'], 'charge', '1'),
+        (rows[0]['atom'], 'bond', '2'),  # measured to the origin: not shown, not edited
+        (99, 'bond', '1'),
+    ):
+        sample.setZmatrixValue(atom, field, text)
+    assert all(len(emitted) == 1 for emitted in changes)
+
+    sample.setCoordinates('cartesian')  # no Z-matrix edits in other coordinates
+    sample.setZmatrixValue(hydrogen['atom'], 'bond', '1.0')
+    assert all(len(emitted) == 1 for emitted in changes[1:])
+
+
+def test_sample_range_selection_follows_the_zmatrix_rows(qcore_application):
+    sample = Sample()
+    sample.setCoordinates('zmatrix')
+    order = [row['atom'] for row in sample.zmatrix]
+
+    sample.selectAtom(order[2], 'only')
+    sample.selectAtom(order[5], 'range')
+
+    assert sample.selectedAtoms == order[2:6]
+
+
+def test_sample_reports_a_linear_molecule_without_zmatrix(qcore_application, tmp_path):
+    acetylene = tmp_path / 'acetylene.xyz'
+    acetylene.write_text('4\n\nH 0 0 -1.66\nC 0 0 -0.6\nC 0 0 0.6\nH 0 0 1.66\n', encoding='utf-8')
+    sample = Sample()
+    sample.loadStructure(str(acetylene))
+
+    sample.setCoordinates('zmatrix')
+
+    assert sample.zmatrix == [] and 'linear' in sample.zmatrixError
+    sample.selectAtom(0, 'only')
+    sample.selectAtom(2, 'range')  # atom order when there are no rows
+    assert sample.selectedAtoms == [0, 1, 2]
+
+    sample.loadStructure(str(acetylene))  # a load starts again from Cartesian coordinates
+    assert sample.coordinates == 'cartesian' and sample.zmatrixError == ''
+
+
 def test_sample_edits_no_cell_of_a_molecule(qcore_application):
     sample = Sample()
     changes = _emissions(sample.sampleChanged)
@@ -871,3 +960,17 @@ def test_backend_relays_an_edited_cell_to_the_method_part(backend, nacl_cif):
     backend.sample.setCellParameter('c', '2.5')
 
     assert backend.method.kpointGrid == [2, 2, 4]
+
+
+def test_backend_optimisation_updates_the_zmatrix(backend, tmp_path):
+    _load_water(backend, tmp_path)
+    backend.sample.setCoordinates('zmatrix')
+    before = backend.sample.zmatrix
+    changes = _emissions(backend.sample.zmatrixChanged)
+
+    backend.job._chunks = [WATER.read_text(encoding='utf-8')]
+    backend.job._set_state(JobState.COMPLETED, '')
+
+    after = backend.sample.zmatrix
+    assert changes and [row['atom'] for row in after] == [row['atom'] for row in before]
+    assert after[1]['bond'] != before[1]['bond'] and backend.sample.coordinates == 'zmatrix'

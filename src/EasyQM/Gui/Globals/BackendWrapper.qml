@@ -77,9 +77,16 @@ QtObject {
     function sampleSetViewRepeat(na, nb, nc) { activeBackend.sample.setViewRepeat(na, nb, nc) }
     readonly property bool sampleViewBoundaryAtoms: activeBackend.sample.viewBoundaryAtoms
     function sampleSetViewBoundaryAtoms(value) { activeBackend.sample.setViewBoundaryAtoms(value) }
-    // 'cartesian' | 'fractional', for the atom tables
+    // 'cartesian' | 'fractional' (crystal) | 'zmatrix' (molecule), for the atom tables
     readonly property string sampleCoordinates: activeBackend.sample.coordinates
     function sampleSetCoordinates(value) { activeBackend.sample.setCoordinates(value) }
+    // Z-matrix rows in construction order, while shown: [{atom, label, element, bondTo, bond,
+    // angleTo, angle, dihedralTo, dihedral}]; a reference '' is the origin or an axis
+    readonly property var sampleZmatrix: activeBackend.sample.zmatrix
+    // Why there is no Z-matrix to show (a linear molecule); '' otherwise
+    readonly property string sampleZmatrixError: activeBackend.sample.zmatrixError
+    // field 'bond' | 'angle' | 'dihedral', as typed; refused text changes nothing
+    function sampleSetZmatrixValue(atom, field, text) { activeBackend.sample.setZmatrixValue(atom, field, text) }
     // Selected atom indices, shared by the viewer and the atom tables
     readonly property var sampleSelectedAtoms: activeBackend.sample.selectedAtoms
     // Indices into sampleSceneAtoms of the selected drawn atoms
