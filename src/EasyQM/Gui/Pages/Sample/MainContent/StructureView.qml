@@ -38,7 +38,6 @@ Rectangle {
     readonly property var centre: Globals.BackendWrapper.sampleSceneCentre
     readonly property real extent: Globals.BackendWrapper.sampleSceneExtent
     readonly property var selected: Globals.BackendWrapper.sampleSelectedSceneAtoms
-    readonly property string source: Globals.BackendWrapper.sampleSummary
     readonly property bool periodic: Globals.BackendWrapper.samplePeriodic
 
     // Scene units per Å: the built-in meshes are 100 units across.
@@ -48,7 +47,12 @@ Rectangle {
     // A thickness that looks the same at any zoom, in scene units per pixel.
     readonly property real pixel: unit / scale
 
-    onSourceChanged: Qt.callLater(resetView)
+    // A loaded structure starts from the default view; an edited or optimised one keeps the
+    // user's rotation, zoom and pan.
+    Connections {
+        target: Globals.BackendWrapper
+        function onSampleStructureLoaded() { Qt.callLater(view.resetView) }
+    }
     onScaleChanged: reproject()
     onPanXChanged: reproject()
     onPanYChanged: reproject()

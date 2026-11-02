@@ -199,8 +199,8 @@ max-complexity = 10
 [tool.ruff.lint.pycodestyle]
 # PEP 8 line length guidance:
 # https://peps.python.org/pep-0008/#maximum-line-length
-max-line-length = 99 # See also `line-length` in [tool.ruff]
-max-doc-length = 72
+max-line-length = 127 # See also `line-length` in [tool.ruff]
+max-doc-length = 127
 
 [tool.ruff.lint.pydocstyle]
 convention = 'numpy'

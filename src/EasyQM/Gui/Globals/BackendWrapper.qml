@@ -61,6 +61,10 @@ QtObject {
     function sampleSetAtomFixed(index, value) { activeBackend.sample.setAtomFixed(index, value) }
     // XYZ (extended XYZ with a cell) or CIF
     function sampleLoadStructure(path) { activeBackend.sample.loadStructure(path) }
+    // Edits, as typed: axis 0, 1, 2 in the coordinates the tables show; name 'a' … 'gamma'.
+    // Text that is not a number, or makes no cell, changes nothing.
+    function sampleSetAtomCoordinate(index, axis, text) { activeBackend.sample.setAtomCoordinate(index, axis, text) }
+    function sampleSetCellParameter(name, text) { activeBackend.sample.setCellParameter(name, text) }
     // What the viewer draws: atoms with copies in other cells, bonds between them, cell edges
     readonly property var sampleSceneAtoms: activeBackend.sample.sceneAtoms
     readonly property var sampleSceneBonds: activeBackend.sample.sceneBonds
@@ -225,6 +229,7 @@ QtObject {
     signal projectSaveError(string message)
     signal projectLoadError(string message)
     signal sampleLoadError(string message)
+    signal sampleStructureLoaded()
     signal jobOutputAppended(string text)
 
     Component.onCompleted: {
@@ -232,6 +237,7 @@ QtObject {
         activeBackend.project.projectSaveError.connect(projectSaveError)
         activeBackend.project.projectLoadError.connect(projectLoadError)
         activeBackend.sample.loadError.connect(sampleLoadError)
+        activeBackend.sample.structureLoaded.connect(sampleStructureLoaded)
         activeBackend.job.outputAppended.connect(jobOutputAppended)
     }
 

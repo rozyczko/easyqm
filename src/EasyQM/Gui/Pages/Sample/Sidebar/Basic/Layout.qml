@@ -38,10 +38,10 @@ EaComponents.SideBarColumn {
 
         Loader { source: 'Groups/UnitCell.qml' }
 
-        // Each loaded structure: open for a crystal, closed for a molecule.
+        // Each loaded structure, not each edit: open for a crystal, closed for a molecule.
         Connections {
             target: Globals.BackendWrapper
-            function onSampleSummaryChanged() { unitCellGroup.collapsed = !Globals.BackendWrapper.samplePeriodic }
+            function onSampleStructureLoaded() { unitCellGroup.collapsed = !Globals.BackendWrapper.samplePeriodic }
         }
     }
 

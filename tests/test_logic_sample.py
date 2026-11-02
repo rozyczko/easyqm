@@ -254,6 +254,76 @@ def test_move_atoms_of_a_crystal_takes_the_new_cell_and_wraps(nacl_cif):
     assert sample.atoms[0].x == pytest.approx(5.69)  # Na1 left the cell at the origin
 
 
+def test_set_position_of_a_molecule():
+    sample = Sample.benzene()
+
+    sample.set_position(1, (1.0, 2.0, 3.0))
+
+    assert (sample.atoms[1].x, sample.atoms[1].y, sample.atoms[1].z) == (1.0, 2.0, 3.0)
+    with pytest.raises(ValueError, match='no fractional'):
+        sample.set_position(1, (0.5, 0.5, 0.5), fractional=True)
+
+
+def test_set_position_of_a_crystal_wraps_and_drops_the_space_group(nacl_cif):
+    sample = Sample()
+    sample.load(nacl_cif)
+
+    sample.set_position(0, (0.25, 1.5, -0.25), fractional=True)
+
+    assert sample.cell.fractional(sample.atoms[0].x, sample.atoms[0].y, sample.atoms[0].z) == pytest.approx((0.25, 0.5, 0.75))
+    assert sample.cell.space_group == '' and sample.cell.lengths == pytest.approx((5.6402,) * 3)
+
+    sample.set_position(1, (-1.0, 0.0, 0.0))  # Cartesian, wrapped too
+    assert sample.atoms[1].x == pytest.approx(4.6402)
+
+
+def test_set_cell_parameters_keeps_fractional_coordinates(nacl_cif):
+    sample = Sample()
+    sample.load(nacl_cif)
+    fractional = [sample.cell.fractional(atom.x, atom.y, atom.z) for atom in sample.atoms]
+
+    sample.set_cell_parameters(6.0, 5.6402, 7.0, 90, 90, 120)
+
+    assert sample.cell.lengths == pytest.approx((6.0, 5.6402, 7.0))
+    assert sample.cell.angles == pytest.approx((90, 90, 120))
+    assert sample.cell.space_group == ''
+    for atom, before in zip(sample.atoms, fractional):
+        assert sample.cell.fractional(atom.x, atom.y, atom.z) == pytest.approx(before, abs=1e-12)
+
+
+def test_set_cell_parameters_keeps_the_orientation():
+    # A cubic cell turned 90° about z, as an extended XYZ file may give it: a along y.
+    sample = Sample()
+    sample.atoms, sample.cell = read_xyz('1\nLattice="0 4 0 -4 0 0 0 0 4"\nAr 1 1 1\n')
+
+    sample.set_cell_parameters(5.0, 4.0, 4.0, 90, 90, 90)
+
+    assert sample.cell.vectors[0] == pytest.approx((0.0, 5.0, 0.0))
+    assert sample.cell.vectors[1] == pytest.approx((-4.0, 0.0, 0.0))
+    assert sample.cell.vectors[2] == pytest.approx((0.0, 0.0, 4.0))
+
+
+@pytest.mark.parametrize(
+    'parameters, message',
+    [
+        ((0, 5, 5, 90, 90, 90), 'positive'),
+        ((5, 5, 5, 90, 180, 90), 'between'),
+        ((5, 5, 5, 120, 120, 120), 'do not form'),  # 120° three times is a flat cell
+    ],
+)
+def test_set_cell_parameters_refuses_what_makes_no_cell(nacl_cif, parameters, message):
+    sample = Sample()
+    sample.load(nacl_cif)
+    before = [(atom.x, atom.y, atom.z) for atom in sample.atoms]
+
+    with pytest.raises(ValueError, match=message):
+        sample.set_cell_parameters(*parameters)
+
+    assert sample.cell.space_group == 'Fm-3m' and [(atom.x, atom.y, atom.z) for atom in sample.atoms] == before
+    with pytest.raises(ValueError, match='no unit cell'):
+        Sample.benzene().set_cell_parameters(5, 5, 5, 90, 90, 90)
+
+
 def test_crystal_formula_and_summary(nacl_cif):
     sample = Sample()
     sample.load(nacl_cif)

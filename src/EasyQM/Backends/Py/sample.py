@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Sample page backend part: the QML-facing proxy of `logic.sample.Sample`."""
 
+import math
 from typing import Optional
 
 from PySide6.QtCore import Property
@@ -21,14 +22,18 @@ from .logic.scene import place
 _COORDINATE_DECIMALS = 4
 _SELECTION_LABELS_SHOWN = 4
 _REPEAT_MAX = 4
+_CELL_PARAMETERS = ('a', 'b', 'c', 'alpha', 'beta', 'gamma')
+_UNCHANGED = 1e-9  # a typed value this close to the current one is no edit
 # Above this the viewer, one 3D model per atom, gets slow (PERIODIC-DESIGN.md, section 4).
 SCENE_ATOM_LIMIT = 2000
 
 
 class Sample(QObject):
-    # The structure was replaced: every property may have changed.
+    # The structure was replaced or edited: every property may have changed.
     sampleChanged = Signal()
-    # Per-atom data changed (PoC1: the fixed flag only).
+    # A structure was loaded from a file (not emitted for edits).
+    structureLoaded = Signal()
+    # Per-atom data changed: positions or the fixed flag.
     atomsChanged = Signal()
     # The selected atoms, shared by the viewer and the atom tables.
     selectionChanged = Signal()
@@ -234,18 +239,15 @@ class Sample(QObject):
         self._selected, self._anchor = [], None
         self._repeat = (1, 1, 1)
         self._coordinates = self._default_coordinates()
-        self._scene = None
-        self.sampleChanged.emit()
-        self.atomsChanged.emit()
         self.viewChanged.emit()
-        self.selectionChanged.emit()
-        self.externalSampleChanged.emit()
+        self._structure_changed()
+        self.structureLoaded.emit()
 
     def apply_optimisation(self, optimisation) -> bool:
         """Move the atoms, and a crystal's cell, to the geometry an optimisation ended at.
 
-        Only if the optimisation started from the structure shown: one loaded while the job ran
-        is left alone. The selection and the view settings stay.
+        Only if the optimisation started from the structure shown: one loaded or edited while
+        the job ran is left alone. The selection and the view settings stay.
         """
         if not self._logic.at_positions(optimisation.initial):
             return False
@@ -253,12 +255,54 @@ class Sample(QObject):
             self._logic.move_atoms(optimisation.final, optimisation.final_cell)
         except ValueError:
             return False
+        self._structure_changed()
+        return True
+
+    # Editing: the user's changes and an optimisation's geometry update the same structure.
+    # Text that is not a number, or values that make no cell, change nothing; the fields
+    # then show the old value again.
+
+    @Slot(int, int, str)
+    def setAtomCoordinate(self, index: int, axis: int, text: str) -> None:
+        """Set x, y or z (axis 0, 1, 2) of an atom, in the coordinates the tables show."""
+        value = _number(text)
+        if value is None or not 0 <= index < self._logic.atom_count or axis not in (0, 1, 2):
+            return
+        atom = self._logic.atoms[index]
+        cell = self._logic.cell
+        fractional = self._coordinates == 'fractional' and cell is not None
+        position = list(cell.fractional(atom.x, atom.y, atom.z) if fractional else (atom.x, atom.y, atom.z))
+        if math.isclose(position[axis], value, abs_tol=_UNCHANGED):
+            return
+        position[axis] = value
+        self._logic.set_position(index, tuple(position), fractional)
+        self._structure_changed()
+
+    @Slot(str, str)
+    def setCellParameter(self, name: str, text: str) -> None:
+        """Set one of a, b, c (Å), alpha, beta, gamma (°) of a crystal's cell; the others stay."""
+        value = _number(text)
+        cell = self._logic.cell
+        if value is None or cell is None or name not in _CELL_PARAMETERS:
+            return
+        parameters = dict(zip(_CELL_PARAMETERS, (*cell.lengths, *cell.angles)))
+        if math.isclose(parameters[name], value, abs_tol=_UNCHANGED):
+            return
+        parameters[name] = value
+        try:
+            self._logic.set_cell_parameters(**parameters)
+        except ValueError:
+            return
+        self._structure_changed()
+
+    def _structure_changed(self) -> None:
+        """The atoms or the cell changed: everything shown from them is out of date. The
+        selection keeps its atoms, so measurements follow them."""
         self._scene = None
         self.sampleChanged.emit()
         self.atomsChanged.emit()
         self.selectionChanged.emit()
         self.externalSampleChanged.emit()
-        return True
 
     # Selection
 
@@ -361,3 +405,12 @@ class Sample(QObject):
 
 def _rounded(values) -> list:
     return [round(value, _COORDINATE_DECIMALS) for value in values]
+
+
+def _number(text: str) -> Optional[float]:
+    """'1.5', ' -0.25', '−0.25', '1,5' -> the number; None for anything else."""
+    try:
+        value = float(str(text).strip().replace('−', '-').replace(',', '.'))
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None

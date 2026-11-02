@@ -7,8 +7,8 @@ import Gui.Components as Components
 import Gui.Globals as Globals
 
 
-// The space group as read from the file. Detecting it, with a tolerance, needs a symmetry
-// library (spglib), which is not used yet.
+// The space group as read from the file; editing the atoms or the cell clears it. Detecting
+// it, with a tolerance, needs a symmetry library (spglib), which is not used yet.
 Column {
     spacing: EaStyle.Sizes.fontPixelSize
     enabled: Globals.BackendWrapper.samplePeriodic
@@ -20,12 +20,12 @@ Column {
             readOnly: true
             horizontalAlignment: TextInput.AlignLeft
             text: Globals.BackendWrapper.samplePeriodic ?
-                      Globals.BackendWrapper.sampleCell.spaceGroup || qsTr('not given in the file') : ''
+                      Globals.BackendWrapper.sampleCell.spaceGroup || qsTr('unknown') : ''
         }
     }
 
     EaElements.Label {
         color: EaStyle.Colors.themeForegroundMinor
-        text: Globals.BackendWrapper.samplePeriodic ? qsTr('As read from the file.') : qsTr('A molecule has no space group.')
+        text: Globals.BackendWrapper.samplePeriodic ? qsTr('As read from the file; cleared by edits.') : qsTr('A molecule has no space group.')
     }
 }

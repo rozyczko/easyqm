@@ -14,6 +14,33 @@ Column {
     readonly property int coordinateWidth: EaStyle.Sizes.fontPixelSize * 4.5
     readonly property bool fractional: Globals.BackendWrapper.sampleCoordinates === 'fractional'
 
+    // An atom's x, y or z, editable in the coordinates shown. Not while a job runs: the job
+    // was set up for the current structure, and an optimisation moves it when it converges.
+    component CoordinateInput: EaComponents.TableViewTextInput {
+        property int atomIndex
+        property int axis
+        property real value
+        readonly property string shown: value.toFixed(4)
+
+        horizontalAlignment: Text.AlignRight
+        enabled: !Globals.BackendWrapper.jobRunning
+        text: shown
+
+        // Editing an atom selects it, unless it is part of the selection already.
+        onActiveFocusChanged: {
+            if (activeFocus && !Globals.BackendWrapper.sampleSelectedAtoms.includes(atomIndex)) {
+                Globals.BackendWrapper.sampleSelectAtom(atomIndex, 'only')
+            }
+        }
+        // A refused or unchanged value shows the backend's value again.
+        onEditingFinished: {
+            if (text !== shown) {
+                Globals.BackendWrapper.sampleSetAtomCoordinate(atomIndex, axis, text)
+            }
+            text = Qt.binding(() => shown)
+        }
+    }
+
     EaComponents.TableView {
         id: atomsTable
 
@@ -108,20 +135,23 @@ Column {
                 horizontalAlignment: Text.AlignLeft
                 text: atom.element
             }
-            EaComponents.TableViewLabel {
+            CoordinateInput {
                 width: coordinateWidth
-                horizontalAlignment: Text.AlignRight
-                text: (fractional ? atom.fx : atom.x).toFixed(4)
+                atomIndex: index
+                axis: 0
+                value: fractional ? atom.fx : atom.x
             }
-            EaComponents.TableViewLabel {
+            CoordinateInput {
                 width: coordinateWidth
-                horizontalAlignment: Text.AlignRight
-                text: (fractional ? atom.fy : atom.y).toFixed(4)
+                atomIndex: index
+                axis: 1
+                value: fractional ? atom.fy : atom.y
             }
-            EaComponents.TableViewLabel {
+            CoordinateInput {
                 width: coordinateWidth
-                horizontalAlignment: Text.AlignRight
-                text: (fractional ? atom.fz : atom.z).toFixed(4)
+                atomIndex: index
+                axis: 2
+                value: fractional ? atom.fz : atom.z
             }
             EaComponents.TableViewCheckBox {
                 width: EaStyle.Sizes.tableRowHeight
@@ -139,7 +169,7 @@ Column {
             id: buttons
             spacing: EaStyle.Sizes.fontPixelSize
 
-            // PoC1: the structure is not editable yet.
+            // Adding and removing atoms is not implemented yet.
             EaElements.SideBarButton {
                 width: EaStyle.Sizes.fontPixelSize * 9
                 fontIcon: 'plus'

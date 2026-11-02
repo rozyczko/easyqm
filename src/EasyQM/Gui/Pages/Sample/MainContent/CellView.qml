@@ -6,7 +6,7 @@ import EasyApplication.Gui.Elements as EaElements
 import Gui.Globals as Globals
 
 
-// The unit cell of a crystal: lattice vectors and parameters, read-only.
+// The unit cell of a crystal: lattice vectors and parameters, read-only (edited in the sidebar).
 Rectangle {
     color: EaStyle.Colors.mainContentBackground
 
@@ -56,7 +56,7 @@ Rectangle {
         EaElements.Label {
             text: periodic ? qsTr('Volume %1 Å³ · space group %2 · %3 atoms in the cell')
                              .arg(cell.volume.toFixed(2))
-                             .arg(cell.spaceGroup || qsTr('not given'))
+                             .arg(cell.spaceGroup || qsTr('unknown'))
                              .arg(Globals.BackendWrapper.sampleAtomCount) : ''
         }
     }

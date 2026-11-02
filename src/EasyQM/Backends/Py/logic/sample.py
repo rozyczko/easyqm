@@ -31,6 +31,7 @@ _BOND_TOLERANCE = 1.2
 _WRAP_TOLERANCE = 1e-6  # a fractional coordinate this close to 0 or 1 is 0
 _OCCUPANCY_TOLERANCE = 1e-3
 _SAME_POSITION = 1e-3  # Å; engines echo the input positions rounded
+_FLAT_CELL = 1e-3  # a cell with less volume than this fraction of a·b·c is refused
 _LATTICE = re.compile(r'Lattice\s*=\s*"([^"]*)"', re.IGNORECASE)
 _PBC = re.compile(r'pbc\s*=\s*"([^"]*)"', re.IGNORECASE)
 
@@ -61,6 +62,23 @@ class Cell:
         cy = c * (cos_alpha - cos_beta * cos_gamma) / sin_gamma
         cz = math.sqrt(max(0.0, c * c - cx * cx - cy * cy))
         return cls(((a, 0.0, 0.0), (b * cos_gamma, b * sin_gamma, 0.0), (cx, cy, cz)), space_group)
+
+    def with_parameters(self, a, b, c, alpha, beta, gamma) -> 'Cell':
+        """A cell of these parameters, turned like this one: a keeps its direction and b stays in
+        the plane of a and b. The space group goes, as the new cell may not have it.
+
+        :raises ValueError: for a length that is not positive or angles that span no cell.
+        """
+        if min(a, b, c) <= 0:
+            raise ValueError('Cell lengths must be positive.')
+        if not all(0 < angle < 180 for angle in (alpha, beta, gamma)):
+            raise ValueError('Cell angles must lie between 0° and 180°.')
+        new = Cell.from_parameters(a, b, c, alpha, beta, gamma)
+        if new.volume < _FLAT_CELL * a * b * c:
+            raise ValueError('These angles do not form a cell.')
+        # The rotation from the standard setting to this cell's, applied to the new cell.
+        standard = Cell.from_parameters(*self.lengths, *self.angles)
+        return Cell(tuple(self.cartesian(*standard.fractional(*vector)) for vector in new.vectors))
 
     @property
     def lengths(self) -> Vec:
@@ -209,6 +227,34 @@ class Sample:
             atom.x, atom.y, atom.z = new.x, new.y, new.z
         if self.cell is not None:
             _wrap(self.atoms, self.cell)
+
+    # Editing. The structure no longer has to have the symmetry of its file, so a crystal
+    # loses its space group.
+
+    def set_position(self, index: int, position: Vec, fractional: bool = False) -> None:
+        """Put atom `index` at `position`: Cartesian in Å, or fractional in a crystal's cell.
+        A crystal's atom is wrapped into the cell."""
+        if fractional and self.cell is None:
+            raise ValueError('A molecule has no fractional coordinates.')
+        atom = self.atoms[index]
+        atom.x, atom.y, atom.z = self.cell.cartesian(*position) if fractional else position
+        if self.cell is not None:
+            self.cell = Cell(self.cell.vectors)
+            _wrap([atom], self.cell)
+
+    def set_cell_parameters(self, a, b, c, alpha, beta, gamma) -> None:
+        """Give a crystal a cell of these lengths (Å) and angles (°). The atoms keep their
+        fractional coordinates; the cell keeps its orientation (`Cell.with_parameters`).
+
+        :raises ValueError: for a molecule or parameters that make no cell; nothing changes then.
+        """
+        if self.cell is None:
+            raise ValueError('A molecule has no unit cell.')
+        cell = self.cell.with_parameters(a, b, c, alpha, beta, gamma)
+        fractional = [self.cell.fractional(atom.x, atom.y, atom.z) for atom in self.atoms]
+        self.cell = cell
+        for atom, position in zip(self.atoms, fractional):
+            atom.x, atom.y, atom.z = cell.cartesian(*position)
 
 
 def read_xyz(text: str) -> tuple[list[Atom], Optional[Cell]]:

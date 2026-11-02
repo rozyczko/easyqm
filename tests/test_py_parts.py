@@ -324,6 +324,63 @@ def test_sample_selects_copies_in_other_cells(qcore_application, nacl_cif):
     assert sample.selectedSceneAtoms == [0] and sample.selectionText == 'Na1, Na1 [1 0 0]'
 
 
+def test_sample_edits_atom_coordinates(qcore_application):
+    sample = Sample()
+    sample.selectAtom(0, 'only')
+    sample.selectAtom(1, 'toggle')
+    changes = [_emissions(signal) for signal in (sample.atomsChanged, sample.sceneChanged, sample.selectionChanged)]
+    scene = sample.sceneAtoms
+
+    sample.setAtomCoordinate(1, 2, '−0,5')  # minus sign and decimal comma as typed
+
+    assert sample.atoms[1]['z'] == -0.5 and sample.sceneAtoms[1]['z'] == -0.5 and scene[1]['z'] == 0.0
+    assert all(len(emitted) == 1 for emitted in changes)
+    assert sample.selectedAtoms == [0, 1] and sample.selectionMeasurement.startswith('distance = 1.4786')
+
+    for text in ('', 'abc', 'nan', '-0.5'):  # not a number, or no change
+        sample.setAtomCoordinate(1, 2, text)
+    sample.setAtomCoordinate(99, 0, '1')
+    sample.setAtomCoordinate(1, 3, '1')
+    assert all(len(emitted) == 1 for emitted in changes)
+
+
+def test_sample_edits_fractional_coordinates_and_the_cell(qcore_application, nacl_cif):
+    sample = Sample()
+    sample.loadStructure(str(nacl_cif))
+    loads = _emissions(sample.structureLoaded)
+    changes = _emissions(sample.sampleChanged)
+
+    sample.setAtomCoordinate(0, 0, '1.25')  # fractional, as the tables show a crystal
+
+    assert sample.atoms[0]['fx'] == 0.25 and sample.atoms[0]['x'] == 1.4101
+    assert sample.cell['spaceGroup'] == '' and sample.summary == 'NaCl.cif · ClNa · Z = 4 · 8 atoms'
+
+    sample.setCoordinates('cartesian')
+    sample.setAtomCoordinate(0, 0, '2.82010')
+    assert sample.atoms[0]['fx'] == 0.5
+
+    sample.setCellParameter('a', '6')
+    assert sample.cell['a'] == 6.0 and sample.cell['b'] == 5.6402 and sample.atoms[0]['x'] == 3.0
+    sample.setCellParameter('gamma', '100')
+    assert sample.cell['gamma'] == 100.0 and sample.cell['alpha'] == 90.0
+    assert len(changes) == 4 and not loads
+
+    for name, text in (('a', '-1'), ('beta', '200'), ('gamma', 'x'), ('volume', '100'), ('a', '6')):
+        sample.setCellParameter(name, text)
+    assert len(changes) == 4 and sample.cell['a'] == 6.0
+
+
+def test_sample_edits_no_cell_of_a_molecule(qcore_application):
+    sample = Sample()
+    changes = _emissions(sample.sampleChanged)
+
+    sample.setCoordinates('fractional')  # not offered for a molecule; edits stay Cartesian
+    sample.setAtomCoordinate(0, 0, '0.5')
+    sample.setCellParameter('a', '5')
+
+    assert sample.atoms[0]['x'] == 0.5 and sample.cell == {} and len(changes) == 1
+
+
 # Calculations
 
 
@@ -780,3 +837,37 @@ def test_backend_keeps_a_structure_loaded_during_the_job(backend):
     backend.job._set_state(JobState.COMPLETED, '')
 
     assert _positions(backend.sample) == before
+
+
+def test_backend_takes_an_optimisation_after_edits_and_edits_after_it(backend, tmp_path):
+    # Edits before the job are the start geometry the job optimises.
+    _load_water(backend, tmp_path)
+    backend.sample.setAtomCoordinate(0, 2, '0.117')  # unchanged: still at the job's start
+    backend.job._chunks = [WATER.read_text(encoding='utf-8')]
+    backend.job._set_state(JobState.COMPLETED, '')
+    assert _positions(backend.sample)[0] == (0.0, 0.0, 0.12)
+
+    # The optimised geometry is edited like any other.
+    backend.sample.setAtomCoordinate(0, 2, '0.2')
+    assert _positions(backend.sample)[0] == (0.0, 0.0, 0.2)
+    assert backend.project.sampleName == 'H2O, 3 atoms'
+
+
+def test_backend_keeps_a_structure_edited_during_the_job(backend, tmp_path):
+    _load_water(backend, tmp_path)
+    backend.sample.setAtomCoordinate(1, 1, '0.8')  # the GUI disables this while a job runs
+    edited = _positions(backend.sample)
+
+    backend.job._chunks = [WATER.read_text(encoding='utf-8')]
+    backend.job._set_state(JobState.COMPLETED, '')
+
+    assert _positions(backend.sample) == edited
+
+
+def test_backend_relays_an_edited_cell_to_the_method_part(backend, nacl_cif):
+    backend.sample.loadStructure(str(nacl_cif))
+    assert backend.method.kpointGrid == [2, 2, 2]
+
+    backend.sample.setCellParameter('c', '2.5')
+
+    assert backend.method.kpointGrid == [2, 2, 4]
