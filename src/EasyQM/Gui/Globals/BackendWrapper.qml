@@ -68,6 +68,12 @@ QtObject {
     // Text that is not a number, or makes no cell, changes nothing.
     function sampleSetAtomCoordinate(index, axis, text) { activeBackend.sample.setAtomCoordinate(index, axis, text) }
     function sampleSetCellParameter(name, text) { activeBackend.sample.setCellParameter(name, text) }
+    // Cartesian x, y, z in Å, from the viewer's atom mover
+    function sampleSetAtomPosition(index, x, y, z) { activeBackend.sample.setAtomPosition(index, x, y, z) }
+    // A carbon at the origin (fractional [0, 0, 0] in a crystal), then selected; removing
+    // every atom is refused
+    function sampleAddAtom() { activeBackend.sample.addAtom() }
+    function sampleRemoveSelectedAtoms() { activeBackend.sample.removeSelectedAtoms() }
     // What the viewer draws: atoms with copies in other cells, bonds between them, cell edges
     readonly property var sampleSceneAtoms: activeBackend.sample.sceneAtoms
     readonly property var sampleSceneBonds: activeBackend.sample.sceneBonds

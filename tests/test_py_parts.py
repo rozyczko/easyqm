@@ -3,6 +3,7 @@
 """Proxies of the Sample, Calculations and Method parts, and their relays in PyBackend."""
 
 import json
+import math
 import re
 import sys
 import time
@@ -483,6 +484,79 @@ def test_sample_edits_no_cell_of_a_molecule(qcore_application):
     sample.setCellParameter('a', '5')
 
     assert sample.atoms[0]['x'] == 0.5 and sample.cell == {} and len(changes) == 1
+
+
+def test_sample_moves_an_atom_to_a_cartesian_position(qcore_application):
+    sample = Sample()
+    sample.setCoordinates('zmatrix')
+    sample.selectAtom(0, 'only')
+    sample.selectAtom(1, 'toggle')
+    changes = [_emissions(signal) for signal in (sample.atomsChanged, sample.zmatrixChanged, sample.externalSampleChanged)]
+
+    sample.setAtomPosition(1, 1.5, 0.5, 0.25)
+
+    assert (sample.atoms[1]['x'], sample.atoms[1]['y'], sample.atoms[1]['z']) == (1.5, 0.5, 0.25)
+    assert sample.selectedAtoms == [0, 1] and sample.selectionMeasurement.startswith('distance = ')
+    assert all(len(emitted) == 1 for emitted in changes)
+
+    sample.setAtomPosition(1, 1.5, 0.5, 0.25)  # unchanged
+    sample.setAtomPosition(12, 0.0, 0.0, 0.0)
+    sample.setAtomPosition(1, math.nan, 0.0, 0.0)
+    assert all(len(emitted) == 1 for emitted in changes)
+
+
+def test_sample_adds_an_atom_at_the_origin_and_selects_it(qcore_application, nacl_cif):
+    sample = Sample()
+    sample.selectAtom(0, 'only')
+    changes = [_emissions(signal) for signal in (sample.atomsChanged, sample.sceneChanged, sample.externalSampleChanged)]
+
+    sample.addAtom()
+
+    assert sample.atomCount == 13 and sample.formula == 'C7H6' and len(sample.sceneAtoms) == 13
+    new = sample.atoms[12]
+    assert (new['label'], new['element'], new['x'], new['y'], new['z']) == ('C13', 'C', 0.0, 0.0, 0.0)
+    assert sample.selectedAtoms == [12]
+    assert all(len(emitted) == 1 for emitted in changes)
+
+    sample.loadStructure(str(nacl_cif))
+    sample.addAtom()
+    new = sample.atoms[8]
+    assert (new['fx'], new['fy'], new['fz']) == (0.0, 0.0, 0.0) and sample.cell['spaceGroup'] == ''
+
+
+def test_sample_removes_the_selected_atoms(qcore_application):
+    sample = Sample()
+    sample.setCoordinates('zmatrix')
+    sample.removeSelectedAtoms()  # nothing selected
+    assert sample.atomCount == 12
+
+    sample.selectAtom(6, 'only')
+    sample.selectAtom(0, 'toggle')
+    sample.removeSelectedAtoms()
+
+    assert sample.atomCount == 10 and sample.formula == 'C5H5' and sample.multiplicity == 2
+    assert [atom['label'] for atom in sample.atoms][:6] == ['C2', 'C3', 'C4', 'C5', 'C6', 'H8']
+    assert sample.selectedAtoms == [] and sample.selectionText == ''
+    assert sorted(row['atom'] for row in sample.zmatrix) == list(range(10))  # new references
+
+    for index in range(10):
+        sample.selectAtom(index, 'toggle')
+    sample.removeSelectedAtoms()  # all of them: refused
+    assert sample.atomCount == 10 and len(sample.selectedAtoms) == 10
+
+
+def test_sample_add_atom_keeps_the_scene_under_its_limit(qcore_application, tmp_path):
+    crystal = tmp_path / 'crystal.xyz'
+    atoms = ''.join(f'H {0.1 * n} 0 0\n' for n in range(31))
+    crystal.write_text(f'31\nLattice="10 0 0 0 10 0 0 0 10"\n{atoms}', encoding='utf-8')
+    sample = Sample()
+    sample.loadStructure(str(crystal))
+    sample.setViewRepeat(4, 4, 4)  # 31 × 64 = 1984 drawn atoms
+    assert sample.viewRepeat == [4, 4, 4]
+
+    sample.addAtom()  # 32 × 64 would be over the limit
+
+    assert sample.viewRepeat == [1, 1, 1] and sample.atomCount == 32
 
 
 # Calculations

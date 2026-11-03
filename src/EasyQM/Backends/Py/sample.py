@@ -29,6 +29,7 @@ _SELECTION_LABELS_SHOWN = 4
 _REPEAT_MAX = 4
 _CELL_PARAMETERS = ('a', 'b', 'c', 'alpha', 'beta', 'gamma')
 _UNCHANGED = 1e-9  # a typed value this close to the current one is no edit
+_NEW_ATOM_ELEMENT = 'C'
 # Above this the viewer, one 3D model per atom, gets slow (PERIODIC-DESIGN.md, section 4).
 SCENE_ATOM_LIMIT = 2000
 
@@ -337,6 +338,18 @@ class Sample(QObject):
         self._logic.set_position(index, tuple(position), fractional)
         self._structure_changed()
 
+    @Slot(int, float, float, float)
+    def setAtomPosition(self, index: int, x: float, y: float, z: float) -> None:
+        """Put an atom at Cartesian x, y, z in Å: where the viewer's atom mover dropped it."""
+        position = (x, y, z)
+        if not 0 <= index < self._logic.atom_count or not all(map(math.isfinite, position)):
+            return
+        atom = self._logic.atoms[index]
+        if all(math.isclose(old, new, abs_tol=_UNCHANGED) for old, new in zip((atom.x, atom.y, atom.z), position)):
+            return
+        self._logic.set_position(index, position)
+        self._structure_changed()
+
     @Slot(str, str)
     def setCellParameter(self, name: str, text: str) -> None:
         """Set one of a, b, c (Å), alpha, beta, gamma (°) of a crystal's cell; the others stay."""
@@ -369,6 +382,35 @@ class Sample(QObject):
         except (KeyError, ValueError):
             return
         self._logic.set_positions(positions)
+        self._structure_changed()
+
+    @Slot()
+    def addAtom(self) -> None:
+        """Add a carbon atom at the origin, Cartesian (0, 0, 0) of a molecule or fractional
+        [0, 0, 0] of a crystal, and select it alone, ready for its coordinates."""
+        index = self._logic.add_atom(_NEW_ATOM_ELEMENT, (0.0, 0.0, 0.0), fractional=self._logic.periodic)
+        self._selected, self._anchor = [(index, HOME)], index
+        self._atom_count_changed()
+
+    @Slot()
+    def removeSelectedAtoms(self) -> None:
+        """Remove the selected atoms; refused when they are all the atoms."""
+        if not self._selected:
+            return
+        try:
+            self._logic.remove_atoms(self.selectedAtoms)
+        except ValueError:
+            return
+        self._selected, self._anchor = [], None
+        self._atom_count_changed()
+
+    def _atom_count_changed(self) -> None:
+        """The atom indices changed: the Z-matrix picks new references, and a repeat that
+        would now draw too many atoms goes back to one cell."""
+        self._construction = None
+        if self._logic.atom_count * math.prod(self._repeat) > SCENE_ATOM_LIMIT:
+            self._repeat = (1, 1, 1)
+            self.viewChanged.emit()
         self._structure_changed()
 
     def _structure_changed(self) -> None:

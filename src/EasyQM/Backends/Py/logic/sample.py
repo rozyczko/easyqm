@@ -179,6 +179,9 @@ class Sample:
     def _element_counts(self) -> Counter:
         return Counter(atom.element for atom in self.atoms)
 
+    def _electrons(self) -> int:
+        return sum(atomic_number(atom.element) for atom in self.atoms) - self.charge
+
     # Input
 
     def load(self, path: Union[str, Path]) -> None:
@@ -201,8 +204,7 @@ class Sample:
         self.source = path.name
         self.name = path.stem
         self.charge = 0
-        electrons = sum(atomic_number(atom.element) for atom in atoms)
-        self.multiplicity = 1 + electrons % 2
+        self.multiplicity = 1 + self._electrons() % 2
 
     # Geometry from a calculation
 
@@ -252,6 +254,44 @@ class Sample:
         if self.cell is not None:
             self.cell = Cell(self.cell.vectors)
             _wrap(self.atoms, self.cell)
+
+    def add_atom(self, element: str, position: Vec = (0.0, 0.0, 0.0), fractional: bool = False) -> int:
+        """Add an atom of `element` at `position`, as in `set_position`, after the others; it
+        is labelled with the next number ('C13' after 'H12'). Returns its index."""
+        if element not in SYMBOLS:
+            raise ValueError(f'"{element}" is not an element.')
+        if fractional and self.cell is None:
+            raise ValueError('A molecule has no fractional coordinates.')
+        numbers = (re.search(r'\d+$', atom.label) for atom in self.atoms)
+        number = 1 + max((int(match.group()) for match in numbers if match), default=0)
+        self.atoms.append(Atom(f'{element}{number}', element, 0.0, 0.0, 0.0))
+        self.set_position(len(self.atoms) - 1, position, fractional)
+        self._electrons_changed()
+        return len(self.atoms) - 1
+
+    def remove_atoms(self, indices) -> None:
+        """Remove the atoms at `indices`; the others keep their labels.
+
+        :raises ValueError: for an index out of range, or if no atom would be left; nothing
+            changes then.
+        """
+        removed = set(indices)
+        if not all(0 <= index < len(self.atoms) for index in removed):
+            raise ValueError('No such atom.')
+        if len(removed) >= len(self.atoms):
+            raise ValueError('A structure needs at least one atom.')
+        if not removed:
+            return
+        self.atoms = [atom for index, atom in enumerate(self.atoms) if index not in removed]
+        if self.cell is not None:
+            self.cell = Cell(self.cell.vectors)
+        self._electrons_changed()
+
+    def _electrons_changed(self) -> None:
+        """Atoms came or went: a multiplicity the electron count no longer allows (a singlet
+        of an odd count) goes to the lowest one it allows."""
+        if (self.multiplicity - 1) % 2 != self._electrons() % 2:
+            self.multiplicity = 1 + self._electrons() % 2
 
     def set_cell_parameters(self, a, b, c, alpha, beta, gamma) -> None:
         """Give a crystal a cell of these lengths (Å) and angles (°). The atoms keep their

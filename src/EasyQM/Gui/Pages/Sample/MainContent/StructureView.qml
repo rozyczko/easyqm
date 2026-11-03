@@ -12,7 +12,7 @@ import Gui.Globals as Globals
 // Structure viewer on QtQuick3D, the same for molecules and crystals: it draws the scene the
 // Sample part builds (logic/scene.py), atoms with their copies in other cells, bonds and cell
 // edges, and does not know which kind of system it shows. Drag to rotate, right-drag to pan,
-// wheel to zoom, click to select.
+// wheel to zoom, click to select; in a molecule, Shift-drag an atom to move it.
 //
 // The View3D set-up (orthographic camera on a turntable node, cell edges and axes as
 // cylinders, rotation with Node.rotate) follows EasyDiffractionBeta's StructureViewTab.qml,
@@ -31,12 +31,21 @@ Rectangle {
     property real panY: 0.0
     // Changed whenever the projection changes, so that the 2D labels follow the 3D scene.
     property int projection: 0
+    // The atom being moved (index into atoms, -1 for none) and where it is drawn meanwhile,
+    // in scene units in the structure node. The structure changes only when it is dropped.
+    property int dragAtom: -1
+    property vector3d dragPoint
+    // Moving atoms: molecules only, and not while a job runs, as for the table edits.
+    readonly property bool canMove: !periodic && !Globals.BackendWrapper.jobRunning
 
     readonly property var atoms: Globals.BackendWrapper.sampleSceneAtoms
     readonly property var bonds: Globals.BackendWrapper.sampleSceneBonds
     readonly property var edges: Globals.BackendWrapper.sampleCellEdges
-    readonly property var centre: Globals.BackendWrapper.sampleSceneCentre
-    readonly property real extent: Globals.BackendWrapper.sampleSceneExtent
+    // What the view is centred on and fitted to (`frame`). A crystal's follow its cells; a
+    // molecule's stay as loaded or last fitted, as its atoms set them: refitted on every
+    // edit, the view would shift and zoom under the atom mover.
+    property var centre: []
+    property real extent: 0
     readonly property var selected: Globals.BackendWrapper.sampleSelectedSceneAtoms
     readonly property bool periodic: Globals.BackendWrapper.samplePeriodic
 
@@ -48,11 +57,14 @@ Rectangle {
     readonly property real pixel: unit / scale
 
     // A loaded structure starts from the default view; an edited or optimised one keeps the
-    // user's rotation, zoom and pan.
+    // user's rotation, zoom and pan, and a molecule also its framing.
     Connections {
         target: Globals.BackendWrapper
         function onSampleStructureLoaded() { Qt.callLater(view.resetView) }
+        function onSampleSceneCentreChanged() { if (view.periodic) view.frame() }
+        function onSampleSceneExtentChanged() { if (view.periodic) view.frame() }
     }
+    Component.onCompleted: frame()
     onScaleChanged: reproject()
     onPanXChanged: reproject()
     onPanYChanged: reproject()
@@ -75,7 +87,13 @@ Rectangle {
         projection++
     }
 
+    function frame() {
+        centre = Globals.BackendWrapper.sampleSceneCentre
+        extent = Globals.BackendWrapper.sampleSceneExtent
+    }
+
     function resetView() {
+        frame()
         // A molecule as in its file, x right and y up; a crystal tilted so that the cell reads
         // as a box (the EasyDiffractionBeta default).
         turntable.eulerRotation = periodic ? Qt.vector3d(12, -34, -8) : Qt.vector3d(0, 0, 0)
@@ -122,6 +140,15 @@ Rectangle {
 
     function scenePoint(x, y, z) {
         return Qt.vector3d(x * unit, y * unit, z * unit)
+    }
+
+    // Where a drawn atom is: at the cursor while it is being moved.
+    function drawnPoint(sceneIndex) {
+        if (sceneIndex === dragAtom) {
+            return dragPoint
+        }
+        const atom = atoms[sceneIndex]
+        return scenePoint(atom.x, atom.y, atom.z)
     }
 
     // A cylinder between two points: bonds, cell edges, axes.
@@ -211,7 +238,7 @@ Rectangle {
                             readonly property var atom: modelData
                             readonly property real radius: view.ballRadius(atom.element) * view.unit
 
-                            position: view.scenePoint(atom.x, atom.y, atom.z)
+                            position: view.drawnPoint(index)
 
                             Ball {
                                 property int sceneIndex: index  // for picking
@@ -225,7 +252,7 @@ Rectangle {
                                 color: Qt.alpha(EaStyle.Colors.orange, 0.45)
                             }
                             Ball {
-                                visible: view.selected.includes(index)
+                                visible: view.selected.includes(index) || view.dragAtom === index
                                 radius: parent.radius + 0.25 * view.unit
                                 color: Qt.alpha(EaStyle.Colors.themeAccent, 0.4)
                             }
@@ -243,8 +270,8 @@ Rectangle {
                             readonly property var second: view.atoms[pair[1]]
 
                             visible: first !== undefined && second !== undefined
-                            from: visible ? view.scenePoint(first.x, first.y, first.z) : Qt.vector3d(0, 0, 0)
-                            to: visible ? view.scenePoint(second.x, second.y, second.z) : Qt.vector3d(0, 1, 0)
+                            from: visible ? view.drawnPoint(pair[0]) : Qt.vector3d(0, 0, 0)
+                            to: visible ? view.drawnPoint(pair[1]) : Qt.vector3d(0, 1, 0)
                             radius: (view.style === 'wireframe' ? 0.04 : 0.1) * view.unit
                             color: '#9aa3ad'
                         }
@@ -282,7 +309,7 @@ Rectangle {
                 readonly property var atom: modelData
                 readonly property vector3d point: {
                     view.projection
-                    return view3d.mapFrom3DScene(structure.mapPositionToScene(view.scenePoint(atom.x, atom.y, atom.z)))
+                    return view3d.mapFrom3DScene(structure.mapPositionToScene(view.drawnPoint(index)))
                 }
 
                 x: point.x - width / 2
@@ -299,19 +326,48 @@ Rectangle {
 
     // Rotate by dragging, pan with the right button, zoom with the wheel. In select mode a
     // click (no drag) picks an atom: alone it replaces the selection, with Ctrl or Shift it is
-    // added or taken out; a click on the background clears the selection.
+    // added or taken out; a click on the background clears the selection. In a molecule,
+    // Shift-dragging an atom moves it in the plane of the screen through it; it stays where
+    // the button is released.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
+        cursorShape: view.dragAtom >= 0 ? Qt.ClosedHandCursor : Qt.ArrowCursor
 
         property point last
         property point press
+        property bool dragged  // moved past the click threshold since the press
+        // Where the moved atom was at the press, in the structure node.
+        property vector3d dragStart
 
-        onPressed: (mouse) => { last = press = Qt.point(mouse.x, mouse.y) }
+        onPressed: (mouse) => {
+            last = press = Qt.point(mouse.x, mouse.y)
+            dragged = false
+            if (mouse.button === Qt.LeftButton && (mouse.modifiers & Qt.ShiftModifier) && view.canMove) {
+                const hit = view3d.pick(mouse.x, mouse.y).objectHit
+                if (hit && hit.sceneIndex !== undefined) {
+                    dragStart = view.drawnPoint(hit.sceneIndex)
+                    view.dragPoint = dragStart
+                    view.dragAtom = hit.sceneIndex
+                }
+            }
+        }
         onPositionChanged: (mouse) => {
             const dx = mouse.x - last.x
             const dy = mouse.y - last.y
             last = Qt.point(mouse.x, mouse.y)
+            dragged = dragged || Math.hypot(mouse.x - press.x, mouse.y - press.y) > 4
+            if (view.dragAtom >= 0) {
+                // The camera looks down the scene's z axis, x right and y up, at `scale`
+                // pixels per Å: the cursor's travel since the press, turned into the structure
+                // node, keeps the atom under it at its depth. Not View3D.mapTo3DScene: during
+                // a drag it reads the camera of an earlier frame now and then, and the atom jumps.
+                if (dragged) {
+                    const travel = Qt.vector3d(mouse.x - press.x, press.y - mouse.y, 0).times(view.unit / view.scale)
+                    view.dragPoint = dragStart.plus(structure.mapDirectionFromScene(travel))
+                }
+                return
+            }
             if (pressedButtons & Qt.RightButton) {
                 view.panX += dx / view.scale
                 view.panY -= dy / view.scale
@@ -322,7 +378,17 @@ Rectangle {
             view.reproject()
         }
         onReleased: (mouse) => {
-            if (mouse.button !== Qt.LeftButton || !view.selectMode || Math.hypot(mouse.x - press.x, mouse.y - press.y) > 4) {
+            if (mouse.button === Qt.LeftButton && view.dragAtom >= 0) {
+                const moved = view.dragAtom
+                view.dragAtom = -1
+                if (dragged) {
+                    const position = view.dragPoint.times(1 / view.unit)
+                    Globals.BackendWrapper.sampleSetAtomPosition(view.atoms[moved].atom, position.x, position.y, position.z)
+                    return
+                }
+                // A Shift-click without a drag selects, as without the mover.
+            }
+            if (mouse.button !== Qt.LeftButton || !view.selectMode || dragged) {
                 return
             }
             const hit = view3d.pick(mouse.x, mouse.y).objectHit
@@ -333,6 +399,8 @@ Rectangle {
                 Globals.BackendWrapper.sampleClearSelection()
             }
         }
+        // A lost grab drops the move: the atom goes back to where it was.
+        onCanceled: view.dragAtom = -1
         onWheel: (wheel) => {
             view.zoom = Math.min(10.0, Math.max(0.2, view.zoom * (wheel.angleDelta.y > 0 ? 1.1 : 1 / 1.1)))
         }
@@ -508,8 +576,8 @@ Rectangle {
         anchors.right: parent.right
         anchors.margins: EaStyle.Sizes.fontPixelSize * 1.5
         color: EaStyle.Colors.themeForegroundMinor
-        text: view.selectMode ?
-                  qsTr('Select: click · Add: Ctrl+click · Rotate: drag · Pan: right-drag · Zoom: wheel') :
-                  qsTr('Rotate: drag · Pan: right-drag · Zoom: wheel')
+        text: (view.selectMode ? qsTr('Select: click · Add: Ctrl+click · ') : '') +
+              (view.canMove ? qsTr('Move: Shift+drag · ') : '') +
+              qsTr('Rotate: drag · Pan: right-drag · Zoom: wheel')
     }
 }

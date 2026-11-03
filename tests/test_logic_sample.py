@@ -277,6 +277,59 @@ def test_set_position_of_a_crystal_wraps_and_drops_the_space_group(nacl_cif):
     assert sample.atoms[1].x == pytest.approx(4.6402)
 
 
+def test_add_atom_to_a_molecule():
+    sample = Sample.benzene()
+
+    index = sample.add_atom('C')
+
+    atom = sample.atoms[index]
+    assert index == 12 and (atom.label, atom.element, atom.x, atom.y, atom.z) == ('C13', 'C', 0.0, 0.0, 0.0)
+    assert sample.multiplicity == 1  # 48 electrons: still a singlet
+    sample.add_atom('H', (1.0, 2.0, 3.0))
+    assert sample.atoms[13].label == 'H14' and sample.multiplicity == 2
+    with pytest.raises(ValueError, match='not an element'):
+        sample.add_atom('Xx')
+    with pytest.raises(ValueError, match='no fractional'):
+        sample.add_atom('C', fractional=True)
+    assert sample.atom_count == 14
+
+
+def test_add_atom_to_a_crystal_wraps_and_drops_the_space_group(nacl_cif):
+    sample = Sample()
+    sample.load(nacl_cif)
+
+    index = sample.add_atom('Na', (0.25, 1.25, -0.5), fractional=True)
+
+    atom = sample.atoms[index]
+    assert sample.cell.fractional(atom.x, atom.y, atom.z) == pytest.approx((0.25, 0.25, 0.5))
+    assert sample.cell.space_group == '' and sample.atom_count == 9
+
+
+def test_remove_atoms_keeps_the_other_labels():
+    sample = Sample.benzene()
+
+    sample.remove_atoms([11, 0])
+
+    assert [atom.label for atom in sample.atoms] == [f'C{n}' for n in range(2, 7)] + [f'H{n}' for n in range(7, 12)]
+    assert sample.multiplicity == 2  # C5H5: 35 electrons
+    sample.remove_atoms([8])  # H10
+    assert sample.multiplicity == 1
+    assert sample.add_atom('C') == 9 and sample.atoms[9].label == 'C12'  # after H11
+
+
+def test_remove_atoms_refuses_bad_indices_and_removing_everything(nacl_cif):
+    sample = Sample()
+    sample.load(nacl_cif)
+
+    for indices, message in (([8], 'No such atom'), ([-1], 'No such atom'), (range(8), 'at least one atom')):
+        with pytest.raises(ValueError, match=message):
+            sample.remove_atoms(indices)
+    assert sample.atom_count == 8 and sample.cell.space_group == 'Fm-3m'
+
+    sample.remove_atoms([0])
+    assert sample.atom_count == 7 and sample.cell.space_group == ''
+
+
 def test_set_cell_parameters_keeps_fractional_coordinates(nacl_cif):
     sample = Sample()
     sample.load(nacl_cif)

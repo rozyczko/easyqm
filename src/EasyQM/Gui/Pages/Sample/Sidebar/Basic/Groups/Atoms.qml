@@ -37,18 +37,24 @@ Column {
             id: buttons
             spacing: EaStyle.Sizes.fontPixelSize
 
-            // Adding and removing atoms is not implemented yet.
+            // Not while a job runs, as for the coordinate edits. At least one atom stays.
             EaElements.SideBarButton {
                 width: EaStyle.Sizes.fontPixelSize * 9
                 fontIcon: 'plus'
                 text: qsTr('Add atom')
-                enabled: false
+                enabled: !Globals.BackendWrapper.jobRunning
+                onClicked: Globals.BackendWrapper.sampleAddAtom()
             }
             EaElements.SideBarButton {
+                readonly property int selectedCount: Globals.BackendWrapper.sampleSelectedAtoms.length
+
                 width: EaStyle.Sizes.fontPixelSize * 8
                 fontIcon: 'minus'
                 text: qsTr('Remove')
-                enabled: false
+                ToolTip.text: qsTr('Remove selected atom(s)')
+                enabled: !Globals.BackendWrapper.jobRunning &&
+                         selectedCount > 0 && selectedCount < Globals.BackendWrapper.sampleAtomCount
+                onClicked: Globals.BackendWrapper.sampleRemoveSelectedAtoms()
             }
         }
 
