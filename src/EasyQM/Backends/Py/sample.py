@@ -18,6 +18,8 @@ from .logic.scene import Image
 from .logic.scene import Scene
 from .logic.scene import build_scene
 from .logic.scene import place
+from .logic.symmetry import ATOM_LIMIT as POINT_GROUP_ATOM_LIMIT
+from .logic.symmetry import point_group
 from .logic.zmatrix import FIELDS as ZMATRIX_FIELDS
 from .logic.zmatrix import ZMatrix
 
@@ -63,6 +65,7 @@ class Sample(QObject):
         self._boundary_atoms = True
         self._coordinates = self._default_coordinates()
         self._scene: Optional[Scene] = None  # built on first read
+        self._point_group: Optional[str] = None  # found on first read
         # Built on first read in 'zmatrix' mode; the construction (which atoms place which)
         # is kept from one Z-matrix to the next, so rows do not reorder while atoms move.
         self._zmatrix: Optional[ZMatrix] = None
@@ -114,6 +117,19 @@ class Sample(QObject):
         values['spaceGroup'] = cell.space_group
         values['vectors'] = [_rounded(vector) for vector in cell.vectors]
         return values
+
+    @Property(str, notify=sampleChanged)
+    def pointGroup(self) -> str:
+        """Schoenflies symbol of a molecule ('C2v'); '' for a crystal or when not determined."""
+        if self._logic.periodic:
+            return ''
+        if self._point_group is None:
+            self._point_group = point_group(self._logic.atoms)
+        return self._point_group
+
+    @Property(int, constant=True)
+    def pointGroupAtomLimit(self) -> int:
+        return POINT_GROUP_ATOM_LIMIT
 
     @Property(int, notify=sampleChanged)
     def charge(self) -> int:
@@ -359,6 +375,7 @@ class Sample(QObject):
         """The atoms or the cell changed: everything shown from them is out of date. The
         selection keeps its atoms, so measurements follow them."""
         self._scene = None
+        self._point_group = None
         self._zmatrix_stale = True
         self.sampleChanged.emit()
         self.atomsChanged.emit()

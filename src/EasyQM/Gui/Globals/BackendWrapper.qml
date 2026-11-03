@@ -53,6 +53,9 @@ QtObject {
     readonly property bool samplePeriodic: activeBackend.sample.periodic
     // {a, b, c, alpha, beta, gamma, volume, spaceGroup, vectors}; empty for a molecule
     readonly property var sampleCell: activeBackend.sample.cell
+    // Schoenflies symbol of a molecule; empty for a crystal or above samplePointGroupAtomLimit atoms
+    readonly property string samplePointGroup: activeBackend.sample.pointGroup
+    readonly property int samplePointGroupAtomLimit: activeBackend.sample.pointGroupAtomLimit
     readonly property int sampleCharge: activeBackend.sample.charge
     readonly property int sampleMultiplicity: activeBackend.sample.multiplicity
     readonly property var sampleAtoms: activeBackend.sample.atoms

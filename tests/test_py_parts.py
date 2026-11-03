@@ -103,6 +103,21 @@ def test_sample_starts_with_benzene(qcore_application):
     assert len(sample.sceneBonds) == 12 and sample.sceneBonds[0] == [0, 1]
 
 
+def test_sample_point_group_is_found_once_per_change(qcore_application, nacl_cif, monkeypatch):
+    calls = []
+    found = sys.modules['Backends.Py.sample'].point_group
+    monkeypatch.setattr('Backends.Py.sample.point_group', lambda atoms: calls.append(1) or found(atoms))
+    sample = Sample()
+
+    assert sample.pointGroup == sample.pointGroup == 'D6h' and len(calls) == 1
+    changes = _emissions(sample.sampleChanged)
+    sample.setAtomCoordinate(0, 2, '0.3')  # C1 out of the ring plane
+    assert changes and sample.pointGroup == 'Cs' and len(calls) == 2
+
+    sample.loadStructure(str(nacl_cif))
+    assert sample.pointGroup == '' and len(calls) == 2  # a crystal has a space group instead
+
+
 def test_sample_fix_flag(qcore_application):
     sample = Sample()
     changes = _emissions(sample.atomsChanged)

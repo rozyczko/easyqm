@@ -25,6 +25,7 @@ dependencies = [
   'EasyApplication', # Qt/QML components for building graphical applications
   'gemmi',           # Reading and parsing CIF files
   'chemcoord',       # Z-matrix <-> Cartesian conversion for molecules
+  'pointgroup',      # Point group of a molecule
 ]
 
 [project.optional-dependencies]
