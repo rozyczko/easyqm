@@ -8,6 +8,7 @@ crystal or the other way round. The choice lists and values the page shows are t
 engine's; each engine keeps its own `logic.method.Method`, so switching back loses nothing.
 """
 
+from dataclasses import fields
 from pathlib import Path
 from typing import Optional
 
@@ -76,6 +77,25 @@ class Method(QObject):
     @property
     def run_settings(self) -> RunSettings:
         return self._run
+
+    def reset(self) -> None:
+        """Every engine's default method and the default run settings (for PyBackend.reset).
+        The executables and what their detection found stay: they are machine settings. The
+        run settings object stays the same one, as the job holds it; the methods reach the
+        job through PyBackend's engine relay."""
+        self._methods = [adapter.default_method() for adapter in self._adapters]
+        defaults = RunSettings()
+        for field in fields(RunSettings):
+            setattr(self._run, field.name, getattr(defaults, field.name))
+        for signal in (
+            self.engineChanged,
+            self.levelOfTheoryChanged,
+            self.systemChanged,
+            self.scfChanged,
+            self.runSettingsChanged,
+            self.kpointsChanged,
+        ):
+            signal.emit()
 
     def set_sample_cell(self, cell) -> None:
         """The sample's `logic.sample.Cell`, or None for a molecule."""

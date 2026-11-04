@@ -41,6 +41,20 @@ class Calculations(QObject):
         """For the other backend parts (plain Python, not exposed to QML)."""
         return self._logic
 
+    def reset(self) -> None:
+        """Nothing selected, every option at its default (for PyBackend.reset). The logic
+        object stays the same one: the job holds it."""
+        self._logic.reset()
+        for signal in (
+            self.selectionChanged,
+            self.singlePointChanged,
+            self.optimisationChanged,
+            self.frequenciesChanged,
+            self.workflowChanged,
+            self.externalSelectionChanged,
+        ):
+            signal.emit()
+
     # Table and workflow
 
     @Property('QVariantList', notify=selectionChanged)

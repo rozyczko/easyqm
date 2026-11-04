@@ -24,6 +24,7 @@ from Backends.Py.logic.engines.orca import OrcaAdapter
 from Backends.Py.logic.engines.quantum_espresso import CAPABILITIES as QE_CAPABILITIES
 from Backends.Py.logic.engines.quantum_espresso import QuantumEspressoAdapter
 from Backends.Py.logic.method import RunSettings
+from Backends.Py.logic.project import Project as ProjectLogic
 from Backends.Py.logic.results import Results as ResultsLogic
 from Backends.Py.logic.runner import JobState
 from Backends.Py.method import Method
@@ -964,6 +965,77 @@ def test_backend_parses_the_output_when_the_job_ends(backend):
     assert backend.results.available
     assert backend.results.tiles[0]['detail'] == 'B3LYP-D3(BJ)/def2-TZVP'
     assert backend.results.hasOptimisation and backend.results.hasFrequencies
+
+
+def test_backend_starts_unedited_and_tracks_edits(backend, tmp_path):
+    changes = _emissions(backend.editedChanged)
+    assert not backend.edited
+
+    backend.project.setName('Draft')  # a project never created: lost on reset
+    assert backend.edited and len(changes) == 1
+
+    backend.reset()
+    backend.project.setLocation(str(tmp_path / 'Saved'))
+    backend.project.setName('Saved')
+    backend.project.create()
+    assert not backend.edited  # on disk, and auto-saved
+    backend.project.setAutoSave(False)
+    backend.project.setDescription('unsaved')
+    assert backend.edited
+    backend.project.save()
+    assert not backend.edited
+
+    backend.method.setFunctional('PBE0')  # not in the project file: lost on reset
+    assert backend.edited
+
+
+def test_backend_reset_restores_the_start_up_state(backend, tmp_path, nacl_cif):
+    start = {
+        'functional': backend.method.functional,
+        'memory': backend.method.memoryGb,
+        'max_steps': backend.calculations.optMaxSteps,
+    }
+    job_logic = (backend.job._sample, backend.job._calculations, backend.job._settings)
+    backend.project.setLocation(str(tmp_path / 'Old'))
+    backend.project.setName('Old')
+    backend.project.create()
+    backend.sample.loadStructure(str(nacl_cif))
+    backend.sample.setViewRepeat(2, 2, 2)
+    backend.sample.setViewBoundaryAtoms(False)
+    backend.calculations.setSelected('single_point', True)
+    backend.calculations.setOptMaxSteps(7)
+    backend.method.setMemoryGb(4)
+    backend.job._chunks = [WATER.read_text(encoding='utf-8')]
+    backend.job._set_state(JobState.COMPLETED, 'Completed in 1 s')
+    assert backend.results.available and backend.edited
+    loads = _emissions(backend.sample.structureLoaded)
+
+    backend.reset()
+
+    assert not backend.project.created and backend.project.name == ProjectLogic().name
+    assert backend.project.sampleName == 'C6H6, 12 atoms' and backend.project.calculations == []
+    assert backend.project.engine == 'ORCA' and backend.method.engineName == 'ORCA'
+    assert backend.sample.summary == 'benzene.xyz · C6H6 · 12 atoms' and loads
+    assert backend.sample.viewRepeat == [1, 1, 1] and backend.sample.viewBoundaryAtoms
+    assert backend.sample.coordinates == 'cartesian' and backend.sample.selectedAtoms == []
+    assert backend.calculations.selectedCount == 0 and backend.calculations.optMaxSteps == start['max_steps']
+    assert backend.method.functional == start['functional'] and backend.method.memoryGb == start['memory']
+    assert backend.job.state == 'idle' and backend.job.output == '' and backend.job.folder == ''
+    assert not backend.results.available and backend.results.placeholder.startswith('No results yet')
+    assert not backend.edited
+    # The job runs on the same objects as the parts, and on the reset method.
+    assert (backend.job._sample, backend.job._calculations, backend.job._settings) == job_logic
+    assert backend.job._method is backend.method.logic and backend.job._root == ''
+    assert (tmp_path / 'Old' / 'project.json').exists()  # nothing deleted
+
+
+def test_backend_reset_is_refused_while_a_job_runs(backend):
+    backend.calculations.setSelected('single_point', True)
+    backend.job._set_state(JobState.RUNNING, '')
+
+    backend.reset()
+
+    assert backend.calculations.selectedCount == 1 and backend.job.running
 
 
 def _load_water(backend, tmp_path) -> None:

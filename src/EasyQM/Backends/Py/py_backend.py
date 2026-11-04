@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 from PySide6.QtCore import Property
 from PySide6.QtCore import QObject
+from PySide6.QtCore import Signal
+from PySide6.QtCore import Slot
 
 from .calculations import Calculations
 from .job import Job
@@ -18,6 +20,8 @@ class PyBackend(QObject):
     Holds one backend part per GUI page and the connections between them.
     """
 
+    editedChanged = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._project = Project(parent=self)
@@ -33,7 +37,12 @@ class PyBackend(QObject):
             parent=self,
         )
         self._results = Results(parent=self)
+        # Changes since start-up or the last reset: to the parts, whose state the project file
+        # does not hold, and to the project's own fields.
+        self._parts_edited = False
+        self._project_edited = False
         self._connect_parts()
+        self._track_edits()
 
     @Property('QVariant', constant=True)
     def project(self) -> Project:
@@ -58,6 +67,67 @@ class PyBackend(QObject):
     @Property('QVariant', constant=True)
     def results(self) -> Results:
         return self._results
+
+    # Reset (the app bar button)
+
+    @Property(bool, notify=editedChanged)
+    def edited(self) -> bool:
+        """Whether a reset would discard work: the sample, calculations or method changed or a
+        job ran since start-up or the last reset (the project file holds none of it), the
+        project has unsaved changes, or it was edited and never created."""
+        project = self._project
+        return self._parts_edited or project.hasUnsavedChanges or (not project.created and self._project_edited)
+
+    @Slot()
+    def reset(self) -> None:
+        """Everything back to its start-up state: no project, the benzene sample, nothing
+        selected, the default method and run settings, no job or results. The engines'
+        executables stay, and so do the project and run folders on disk. Refused while a job
+        runs. The parts reset their objects in place: the job holds the logic objects."""
+        if self._job.running:
+            return
+        self._project.reset()
+        self._sample.reset()  # the relay also gives the method part the molecule
+        self._calculations.reset()
+        self._method.reset()
+        self._relay_engine()
+        self._job.reset()
+        self._results.reset()
+        self._parts_edited = self._project_edited = False
+        self.editedChanged.emit()
+
+    def _track_edits(self) -> None:
+        # After the start-up relays, which change the parts without the user.
+        parts = (
+            self._sample.externalSampleChanged,
+            self._sample.atomsChanged,  # fixed flags
+            self._calculations.selectionChanged,
+            self._calculations.singlePointChanged,
+            self._calculations.optimisationChanged,
+            self._calculations.frequenciesChanged,
+            self._method.levelOfTheoryChanged,
+            self._method.systemChanged,
+            self._method.scfChanged,
+            self._method.runSettingsChanged,
+            self._method.kpointsChanged,
+            self._job.stateChanged,
+        )
+        for signal in parts:
+            signal.connect(self._part_edited)
+        for signal in (self._project.nameChanged, self._project.descriptionChanged):
+            signal.connect(self._project_field_edited)
+        for signal in (self._project.createdChanged, self._project.hasUnsavedChangesChanged):
+            signal.connect(self.editedChanged)
+
+    def _part_edited(self) -> None:
+        if not self._parts_edited:
+            self._parts_edited = True
+            self.editedChanged.emit()
+
+    def _project_field_edited(self) -> None:
+        if not self._project_edited:
+            self._project_edited = True
+            self.editedChanged.emit()
 
     # Relays between parts. The project summarises the other parts; the setters it offers
     # go through its change tracking, so a created project is saved or flagged like any edit.

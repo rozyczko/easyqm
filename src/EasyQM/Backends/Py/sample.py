@@ -12,6 +12,7 @@ from PySide6.QtCore import Slot
 
 from .helpers import to_local_path
 from .logic.geometry import measure
+from .logic.sample import BENZENE
 from .logic.sample import Sample as SampleLogic
 from .logic.scene import HOME
 from .logic.scene import Image
@@ -295,6 +296,17 @@ class Sample(QObject):
             reason = error.strerror if isinstance(error, OSError) and error.strerror else error
             self.loadError.emit(f'"{path}" could not be read.\n\n{reason}')
             return
+        self._structure_replaced()
+
+    def reset(self) -> None:
+        """Back to the bundled benzene and the default view settings, as at start-up (for
+        PyBackend.reset)."""
+        self._logic.load(BENZENE)
+        self._boundary_atoms = True  # kept by a load, as a display preference
+        self._structure_replaced()
+
+    def _structure_replaced(self) -> None:
+        """Another structure: no selection, one cell, its default coordinates."""
         self._selected, self._anchor = [], None
         self._repeat = (1, 1, 1)
         self._coordinates = self._default_coordinates()

@@ -52,6 +52,13 @@ class Results(QObject):
         self._placeholder = _RUNNING
         self.resultsChanged.emit()
 
+    def reset(self) -> None:
+        """No job has run: the start-up placeholder (for PyBackend.reset)."""
+        self._results = ResultsLogic()
+        self._method_label = ''
+        self._placeholder = _NO_JOB
+        self.resultsChanged.emit()
+
     def set_results(self, results: ResultsLogic) -> None:
         self._results = results
         self._placeholder = _NOTHING_FOUND if results.empty else ''

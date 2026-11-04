@@ -13,6 +13,16 @@ QtObject {
 
     readonly property var activeBackend: Backends.PyBackend
 
+    /////////////////////////////////////////////
+    // Whole application (the app bar Reset button)
+    /////////////////////////////////////////////
+    // Whether a reset would discard work: edits since start-up or the last reset that no
+    // saved project file holds
+    readonly property bool edited: activeBackend.edited
+    // Everything back to start-up: no project, the benzene sample, default calculations and
+    // method, no job or results; refused while a job runs
+    function reset() { activeBackend.reset() }
+
     ///////////////
     // Project page
     ///////////////
@@ -40,7 +50,6 @@ QtObject {
     function projectCreate() { activeBackend.project.create() }
     function projectSave() { activeBackend.project.save() }
     function projectLoad(path) { activeBackend.project.load(path) }
-    function projectReset() { activeBackend.project.reset() }
 
     //////////////
     // Sample page

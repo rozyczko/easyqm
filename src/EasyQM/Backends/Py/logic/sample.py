@@ -26,6 +26,7 @@ from .geometry import dot
 from .geometry import norm
 
 STRUCTURES_DIR = Path(__file__).resolve().parents[3] / 'Resources' / 'structures'
+BENZENE = STRUCTURES_DIR / 'benzene.xyz'  # the sample at start-up and after a reset
 
 _BOND_TOLERANCE = 1.2
 _WRAP_TOLERANCE = 1e-6  # a fractional coordinate this close to 0 or 1 is 0
@@ -129,7 +130,7 @@ class Sample:
     @classmethod
     def benzene(cls) -> 'Sample':
         sample = cls()
-        sample.load(STRUCTURES_DIR / 'benzene.xyz')
+        sample.load(BENZENE)
         return sample
 
     # Derived

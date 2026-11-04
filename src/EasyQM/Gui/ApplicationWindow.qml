@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 
+import EasyApplication.Gui.Globals as EaGlobals
+import EasyApplication.Gui.Style as EaStyle
 import EasyApplication.Gui.Elements as EaElements
 import EasyApplication.Gui.Components as EaComponents
 
@@ -25,12 +27,48 @@ EaComponents.ApplicationWindow {
             onClicked: Globals.BackendWrapper.projectSave()
         },
 
+        // Not while a job runs: stop it on the Method page first.
         EaElements.ToolButton {
             fontIcon: 'undo'
+            enabled: !Globals.BackendWrapper.jobRunning
             ToolTip.text: qsTr('Reset to initial state without project, sample and calculations')
-            onClicked: Globals.BackendWrapper.projectReset()
+            onClicked: Globals.BackendWrapper.edited ? resetDialog.open() : applicationWindow.resetApplication()
         }
     ]
+
+    // Everything back to start-up, shown from the Home page.
+    function resetApplication() {
+        Globals.BackendWrapper.reset()
+        EaGlobals.Vars.appBarCurrentIndex = 0
+    }
+
+    // Asked only when the reset would discard work (BackendWrapper.edited).
+    EaElements.Dialog {
+        id: resetDialog
+
+        modal: true
+        title: qsTr('Reset EasyQM?')
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        closePolicy: Popup.CloseOnEscape
+
+        onAccepted: applicationWindow.resetApplication()
+        Component.onCompleted: standardButton(Dialog.Ok).text = qsTr('Reset')
+
+        // Fixed implicit size, as in Components.MessageDialog: the wrapped label's implicit
+        // width is that of its unwrapped text, and the dialog would take it.
+        Item {
+            implicitWidth: EaStyle.Sizes.sideBarContentWidth
+            implicitHeight: resetMessage.implicitHeight
+
+            EaElements.Label {
+                id: resetMessage
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: qsTr('The project is closed. Changes that are not in a saved ' +
+                           'project file are lost, including the sample and method settings.')
+            }
+        }
+    }
 
     // Right group of application bar tool buttons
     appBarRightButtons: [

@@ -182,6 +182,17 @@ class Job(QObject):
         self._set_state(JobState.RUNNING, f'Running {self._adapter.name}, serial')
         self._timer.start()
 
+    def reset(self) -> None:
+        """No job run yet, as at start-up (for PyBackend.reset); refused while one runs. The
+        run folders stay on disk."""
+        if self.running:
+            return
+        self._steps, self._step, self._step_failed = [], 0, False
+        self._job_adapter = self._adapter
+        self._set_files_paths('', '', '')
+        self._clear_output()
+        self._set_state(JobState.IDLE, '')
+
     @Slot()
     def stop(self) -> None:
         if not self.running:
@@ -230,7 +241,10 @@ class Job(QObject):
         self.outputChanged.emit()
 
     def _set_files(self, folder: Path, input_path: Path, output_path: Path) -> None:
-        self._folder, self._input_path, self._output_path = str(folder), str(input_path), str(output_path)
+        self._set_files_paths(str(folder), str(input_path), str(output_path))
+
+    def _set_files_paths(self, folder: str, input_path: str, output_path: str) -> None:
+        self._folder, self._input_path, self._output_path = folder, input_path, output_path
         self.filesChanged.emit()
 
     def _set_state(self, state: JobState, message: str) -> None:
