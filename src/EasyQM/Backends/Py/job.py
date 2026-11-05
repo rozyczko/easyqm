@@ -23,6 +23,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
 from PySide6.QtCore import Slot
 
+from .logic.calculations import CalculationType
 from .logic.calculations import info
 from .logic.engines.base import EngineAdapter
 from .logic.method import describe
@@ -49,8 +50,7 @@ def configuration(sample, calculations, method, settings) -> dict:
     }
     calculations_state = {
         'steps': [step.value for step in calculations.workflow()],
-        'options': [asdict(calculations.single_point), asdict(calculations.geometry_optimisation),
-                    asdict(calculations.vibrational_frequencies)],
+        'options': [asdict(getattr(calculations, calculation.value)) for calculation in CalculationType],
     }
     method_state = {'method': asdict(method), 'settings': asdict(settings)}
     return {name: _digest(state) for name, state in

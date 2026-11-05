@@ -93,6 +93,8 @@ Rectangle {
             delegate: EaComponents.TableViewDelegate {
                 readonly property var row: Globals.BackendWrapper.calculationsRows[index]
 
+                enabled: row.enabled  // greys the row's labels and its checkbox
+
                 EaComponents.TableViewCheckBox {
                     width: EaStyle.Sizes.tableRowHeight
                     checked: row.selected
@@ -123,7 +125,8 @@ Rectangle {
                     width: EaStyle.Sizes.fontPixelSize * 14
                     horizontalAlignment: Text.AlignLeft
                     elide: Text.ElideRight
-                    text: row.notes !== '' ? row.notes : '–'
+                    text: row.reason || row.notes || '–'
+                    ToolTip.text: text
                 }
             }
         }

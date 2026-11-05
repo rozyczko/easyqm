@@ -1,0 +1,13 @@
+            UHF EOM-CCSD CALCULATION
+
+IROOT=  1:  0.006687 au     0.182 eV    1467.6 cm**-1
+IROOT=  2:  0.171047 au     4.654 eV   37540.5 cm**-1
+IROOT=  3:  0.330673 au     8.998 eV   72574.4 cm**-1
+
+UHF EOM-CCSD RESULTS
+
+IROOT=  1:  0.000260 au     0.007 eV      57.1 cm**-1
+IROOT=  2:  0.157666 au     4.290 eV   34603.6 cm**-1
+IROOT=  3:  0.300033 au     8.164 eV   65849.6 cm**-1
+
+FINAL SINGLE POINT ENERGY       -75.490282967988

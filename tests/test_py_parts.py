@@ -21,6 +21,8 @@ from Backends.Py.logic.engines.orca import OrcaAdapter
 from Backends.Py.logic.method import Method as MethodLogic
 from Backends.Py.logic.method import RunSettings
 from Backends.Py.logic.project import Project as ProjectLogic
+from Backends.Py.logic.results import Excitation
+from Backends.Py.logic.results import ExcitedStates
 from Backends.Py.logic.results import Results as ResultsLogic
 from Backends.Py.logic.runner import JobState
 from Backends.Py.method import Method
@@ -526,7 +528,9 @@ def test_calculations_rows_and_workflow(qcore_application):
         'Single point energy',
         'Geometry optimisation',
         'Vibrational frequencies',
+        'Excited states',
     ]
+    assert all(row['enabled'] and not row['reason'] for row in calculations.rows)
     assert calculations.selectedCount == 0 and calculations.workflow == []
 
     calculations.setSelected('single_point', True)
@@ -542,6 +546,41 @@ def test_calculations_rows_and_workflow(qcore_application):
         'Single point energy (at optimised geometry)',
     ]
     assert calculations.workflow[1]['step'] == 2
+
+
+def test_excited_states_rows_follow_the_sample_kind(qcore_application):
+    calculations = Calculations()
+    calculations.setSelected('excited_states', True)
+    external = _emissions(calculations.externalSelectionChanged)
+
+    calculations.set_periodic(True)
+    row = calculations.rows[3]
+    assert not row['enabled'] and row['reason'] == 'Molecules only' and not row['selected']
+    assert calculations.selectedCount == 0 and len(external) == 1
+    calculations.setSelected('excited_states', True)  # a greyed row cannot be ticked
+    assert calculations.selectedCount == 0
+
+    calculations.set_periodic(False)
+    assert calculations.rows[3]['enabled'] and not calculations.rows[3]['selected']
+
+
+def test_excited_states_options(qcore_application):
+    calculations = Calculations()
+    changes = _emissions(calculations.excitedStatesChanged)
+    calculations.setExcMethod('eom_ccsd')
+    calculations.setExcStates(8)
+    calculations.setExcStates(8)
+    calculations.setExcTda(False)
+    calculations.setExcTriplets(True)
+    calculations.setExcOccupiedOrbitals(3)
+    calculations.setExcVirtualOrbitals(10)
+    calculations.setExcFrozenCore(False)
+
+    assert len(changes) == 7
+    options = calculations.logic.excited_states
+    assert (options.method, options.states, options.tda, options.triplets) == ('eom_ccsd', 8, False, True)
+    assert (options.occupied_orbitals, options.virtual_orbitals, options.frozen_core) == (3, 10, False)
+    assert [choice['value'] for choice in calculations.excMethodChoices] == ['tddft', 'eom_ccsd']
 
 
 def test_calculations_options(qcore_application):
@@ -769,6 +808,14 @@ def test_backend_relays_the_cell_to_the_method_part(backend, nacl_cif):
     assert backend.method.kpointGrid == [4, 4, 4]
 
 
+def test_backend_greys_excited_states_for_a_crystal(backend, nacl_cif):
+    backend.calculations.setSelected('excited_states', True)
+    assert backend.project.calculations == ['Excited states']
+
+    backend.sample.loadStructure(str(nacl_cif))
+    assert not backend.calculations.rows[3]['enabled'] and backend.project.calculations == []
+
+
 def test_backend_relays_a_loaded_structure(backend, tmp_path):
     water = tmp_path / 'water.xyz'
     water.write_text('3\n\nO 0 0 0\nH 0 0.76 -0.47\nH 0 -0.76 -0.47\n', encoding='utf-8')
@@ -824,6 +871,26 @@ WATER = Path(__file__).parent / 'data' / 'orca_water_opt_freq.out'
 
 def _water() -> ResultsLogic:
     return OrcaAdapter().parse(WATER.read_text(encoding='utf-8'))
+
+
+def test_results_of_excited_states(qcore_application):
+    results = Results()
+    states = [Excitation(1, 7.589, 1, 0.0185), Excitation(1, 6.930, 3, -0.0)]
+    results.set_results(ResultsLogic(excited_states=ExcitedStates('TD-DFT', states)))
+
+    assert results.available and results.hasExcitedStates and results.hasOscillatorStrengths
+    assert results.excitedStatesMethod == 'TD-DFT'
+    assert results.tiles[-1] == {'title': 'Lowest excitation (eV)', 'value': '6.930',
+                                 'detail': 'TD-DFT · 179 nm · f = 0.0000', 'tone': ''}
+    rows = results.excitations
+    assert [(row['key'], row['state'], row['spin']) for row in rows] == [(0, 1, 'singlet'), (1, 1, 'triplet')]
+    assert rows[1]['strengthText'] == '0.0000' and rows[1]['strength'] == 0.0  # no negative zero
+
+    # Open-shell EOM-CCSD: energies only
+    results.set_results(ResultsLogic(excited_states=ExcitedStates('EOM-CCSD', [Excitation(1, 4.29)])))
+    assert not results.hasOscillatorStrengths
+    assert results.excitations[0]['spin'] == '–' and results.excitations[0]['strengthText'] == '–'
+    assert results.tiles[-1]['detail'] == 'EOM-CCSD · 289 nm'
 
 
 def test_results_offer_only_what_was_found(qcore_application):

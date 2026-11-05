@@ -17,6 +17,7 @@ from .sample import Cell
 from .sample import find_bonds
 
 HARTREE_TO_KCAL_PER_MOL = 627.509474
+EV_NM = 1239.84198  # photon energy in eV times its wavelength in nm
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,25 @@ class Frequencies:
         return any(mode.raman_activity is not None for mode in self.modes)
 
 
+@dataclass(frozen=True)
+class Excitation:
+    state: int  # the engine's state number
+    energy: float  # eV, above the ground state
+    multiplicity: Optional[int] = None  # of the excited state, when the engine says
+    oscillator_strength: Optional[float] = None  # missing where the engine has no transition moments
+
+    @property
+    def wavelength(self) -> Optional[float]:
+        """nm"""
+        return EV_NM / self.energy if self.energy > 0 else None
+
+
+@dataclass
+class ExcitedStates:
+    method: str  # as the engine names it: 'TD-DFT/TDA', 'CIS', 'EOM-CCSD'
+    states: list[Excitation]
+
+
 @dataclass
 class Results:
     final_energy: Optional[float] = None  # Eh, the last energy of the job
@@ -86,6 +106,7 @@ class Results:
     dipole: Optional[float] = None  # Debye
     optimisation: Optional[Optimisation] = None
     frequencies: Optional[Frequencies] = None
+    excited_states: Optional[ExcitedStates] = None
 
     @property
     def gap(self) -> Optional[float]:

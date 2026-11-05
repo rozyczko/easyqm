@@ -47,4 +47,21 @@ def test_single_point_at_input_geometry_runs_first():
         CalculationType.SINGLE_POINT,
         CalculationType.GEOMETRY_OPTIMISATION,
         CalculationType.VIBRATIONAL_FREQUENCIES,
+        CalculationType.EXCITED_STATES,
     ]
+
+
+def test_excited_states_are_for_molecules_only():
+    calculations = Calculations()
+    calculations.set_selected(CalculationType.EXCITED_STATES, True)
+    calculations.set_selected(CalculationType.SINGLE_POINT, True)
+    assert calculations.unavailable(CalculationType.EXCITED_STATES) == ''
+
+    calculations.set_periodic(True)  # a crystal was loaded
+    assert calculations.unavailable(CalculationType.EXCITED_STATES) == 'Molecules only'
+    assert calculations.workflow() == [CalculationType.SINGLE_POINT]
+    calculations.set_selected(CalculationType.EXCITED_STATES, True)
+    assert calculations.workflow() == [CalculationType.SINGLE_POINT]
+
+    calculations.reset()  # the sample stays a crystal
+    assert calculations.periodic and calculations.excited_states.states == 5

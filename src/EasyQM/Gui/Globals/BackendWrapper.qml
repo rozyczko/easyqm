@@ -158,6 +158,22 @@ QtObject {
     readonly property bool calculationsFreqRaman: activeBackend.calculations.freqRaman
     function calculationsSetFreqRaman(value) { activeBackend.calculations.setFreqRaman(value) }
 
+    readonly property string calculationsExcMethod: activeBackend.calculations.excMethod
+    readonly property var calculationsExcMethodChoices: activeBackend.calculations.excMethodChoices
+    function calculationsSetExcMethod(value) { activeBackend.calculations.setExcMethod(value) }
+    readonly property int calculationsExcStates: activeBackend.calculations.excStates
+    function calculationsSetExcStates(value) { activeBackend.calculations.setExcStates(value) }
+    readonly property bool calculationsExcTda: activeBackend.calculations.excTda
+    function calculationsSetExcTda(value) { activeBackend.calculations.setExcTda(value) }
+    readonly property bool calculationsExcTriplets: activeBackend.calculations.excTriplets
+    function calculationsSetExcTriplets(value) { activeBackend.calculations.setExcTriplets(value) }
+    readonly property int calculationsExcOccupiedOrbitals: activeBackend.calculations.excOccupiedOrbitals
+    function calculationsSetExcOccupiedOrbitals(value) { activeBackend.calculations.setExcOccupiedOrbitals(value) }
+    readonly property int calculationsExcVirtualOrbitals: activeBackend.calculations.excVirtualOrbitals
+    function calculationsSetExcVirtualOrbitals(value) { activeBackend.calculations.setExcVirtualOrbitals(value) }
+    readonly property bool calculationsExcFrozenCore: activeBackend.calculations.excFrozenCore
+    function calculationsSetExcFrozenCore(value) { activeBackend.calculations.setExcFrozenCore(value) }
+
     //////////////
     // Method page
     //////////////
@@ -253,6 +269,10 @@ QtObject {
     readonly property bool resultsHasIr: activeBackend.results.hasIr
     readonly property bool resultsHasRaman: activeBackend.results.hasRaman
     readonly property var resultsModes: activeBackend.results.modes
+    readonly property bool resultsHasExcitedStates: activeBackend.results.hasExcitedStates
+    readonly property string resultsExcitedStatesMethod: activeBackend.results.excitedStatesMethod
+    readonly property bool resultsHasOscillatorStrengths: activeBackend.results.hasOscillatorStrengths
+    readonly property var resultsExcitations: activeBackend.results.excitations
 
     /////////////////////////////////////////////
     // Assistant panel (toggled from the app bar)

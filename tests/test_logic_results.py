@@ -13,7 +13,8 @@ from Backends.Py.logic.method import describe
 from Backends.Py.logic.results import Results
 from Backends.Py.logic.results import bonds_and_angles
 
-WATER = Path(__file__).parent / 'data' / 'orca_water_opt_freq.out'
+DATA = Path(__file__).parent / 'data'
+WATER = DATA / 'orca_water_opt_freq.out'
 
 
 @pytest.fixture(scope='module')
@@ -66,6 +67,39 @@ def test_single_point_output_has_no_optimisation_or_frequencies():
 
     assert results.final_energy == -76.3 and results.homo == -8.1634
     assert results.optimisation is None and results.frequencies is None and results.dipole is None
+
+
+def _excitations(name: str, before: str = ''):
+    results = OrcaAdapter().parse(before + (DATA / name).read_text(encoding='utf-8'))
+    states = results.excited_states.states
+    return results, [(s.state, s.multiplicity, s.energy, s.oscillator_strength) for s in states]
+
+
+def test_excited_states_after_an_optimisation_leave_the_ground_state_values():
+    # The second ORCA process reports the excited state's energy as its final energy.
+    results, states = _excitations('orca_water_tda_after_opt.out', WATER.read_text(encoding='utf-8'))
+    assert results.final_energy == -76.3011 and results.optimisation is not None
+    assert results.excited_states.method == 'TD-DFT/TDA'
+    assert states == [(1, 1, 7.535326, 0.017248907), (2, 1, 9.429345, 0.0), (3, 1, 9.935074, 0.088207375)]
+    assert results.excited_states.states[0].wavelength == pytest.approx(164.5, abs=0.1)
+
+
+def test_singlets_and_triplets_come_from_the_electric_dipole_table():
+    results, states = _excitations('orca_water_tddft_triplets.out')
+    assert results.excited_states.method == 'TD-DFT' and results.final_energy is None
+    assert len(states) == 8 and [s[1] for s in states[:3]] == [3, 1, 3]
+    assert states[1] == (1, 1, 7.588669, 0.018511223)  # not the velocity table's 0.1046
+
+
+def test_eom_ccsd_strengths_are_the_left_right_ones():
+    results, states = _excitations('orca_water_eom.out')
+    assert results.excited_states.method == 'EOM-CCSD'
+    assert states[0] == (1, 1, 8.194226, 0.021131778) and len(states) == 3
+
+
+def test_open_shell_eom_ccsd_has_energies_only():
+    results, states = _excitations('orca_oh_uhf_eom.out')
+    assert states == [(1, None, 0.007, None), (2, None, 4.29, None), (3, None, 8.164, None)]  # not the guess roots
 
 
 def test_empty_output():

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Summary page backend part: the results of the last job, formatted for the Results tab.
 
-Only what the output contains is offered: a stat tile, the optimisation card or the
-frequencies card appears when its numbers were found, whatever was ticked.
+Only what the output contains is offered: a stat tile, the optimisation, frequencies or
+excited-states card appears when its numbers were found, whatever was ticked.
 """
 
 from typing import Optional
@@ -15,6 +15,7 @@ from PySide6.QtCore import Signal
 from .logic.results import HARTREE_TO_KCAL_PER_MOL
 from .logic.results import Results as ResultsLogic
 from .logic.results import bonds_and_angles
+from .logic.sample import MULTIPLICITY_NAMES
 
 # Keeps a number and its unit on one line in the narrow tiles.
 _KCAL_PER_MOL = '\u00a0kcal/\u2060mol'  # no-break space, word joiner
@@ -115,6 +116,14 @@ class Results(QObject):
             if frequencies.pressure is not None:
                 conditions.append(f'{frequencies.pressure:g} atm')
             tiles.append(_tile('Gibbs free energy (Eh)', _number(frequencies.gibbs_free_energy, '.6f'), ', '.join(conditions)))
+        if results.excited_states is not None:
+            lowest = min(results.excited_states.states, key=lambda state: state.energy)
+            detail = [results.excited_states.method]
+            if lowest.wavelength is not None:
+                detail.append(f'{lowest.wavelength:.0f} nm')
+            if lowest.oscillator_strength is not None:
+                detail.append(f'f = {_strength(lowest.oscillator_strength)}')
+            tiles.append(_tile('Lowest excitation (eV)', f'{lowest.energy:.3f}', ' · '.join(detail)))
         return tiles
 
     # Geometry optimisation card
@@ -195,6 +204,54 @@ class Results(QObject):
             }
             for mode in frequencies.modes
         ]
+
+    # Excited states card
+
+    @Property(bool, notify=resultsChanged)
+    def hasExcitedStates(self) -> bool:
+        return self._results.excited_states is not None
+
+    @Property(str, notify=resultsChanged)
+    def excitedStatesMethod(self) -> str:
+        excited = self._results.excited_states
+        return excited.method if excited is not None else ''
+
+    @Property(bool, notify=resultsChanged)
+    def hasOscillatorStrengths(self) -> bool:
+        """Open-shell EOM-CCSD comes without them."""
+        excited = self._results.excited_states
+        return excited is not None and any(state.oscillator_strength is not None for state in excited.states)
+
+    @Property('QVariantList', notify=resultsChanged)
+    def excitations(self) -> list:
+        """One row per state, in the engine's order; `key` tells apart a singlet and a triplet
+        of the same number."""
+        excited = self._results.excited_states
+        if excited is None:
+            return []
+        return [
+            {
+                'key': index,
+                'state': state.state,
+                'spin': MULTIPLICITY_NAMES[state.multiplicity - 1] if state.multiplicity else '–',
+                'energy': state.energy,
+                'energyText': f'{state.energy:.3f}',
+                'wavelength': _value(state.wavelength),
+                'wavelengthText': '–' if state.wavelength is None else f'{state.wavelength:.1f}',
+                'strength': _nonnegative(_value(state.oscillator_strength)),
+                'strengthText': '–' if state.oscillator_strength is None else _strength(state.oscillator_strength),
+            }
+            for index, state in enumerate(excited.states)
+        ]
+
+
+def _strength(value: float) -> str:
+    """An oscillator strength; non-Hermitian methods give tiny negative ones for dark states."""
+    return f'{_nonnegative(value):.4f}'
+
+
+def _nonnegative(value: float) -> float:
+    return max(value, 0.0) + 0.0  # + 0.0: max(-0.0, 0.0) is -0.0
 
 
 def _value(number: Optional[float]) -> float:
