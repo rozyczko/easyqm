@@ -40,6 +40,11 @@ dev = [
   'validate-pyproject[all]', # Validate pyproject.toml
   'versioningit',             # Automatic versioning from git tags
 ]
+# The assistant's connection to Claude; without it the offline assistant answers.
+llm = [
+  'anthropic>=1.1,<2',        # Claude API client
+  'keyring',                  # Remembering the API key in the system credential store
+]
 
 [project.urls]
 'Source Code' = 'https://github.com/easyscience/easyqm'

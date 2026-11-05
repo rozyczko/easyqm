@@ -7,7 +7,8 @@ import Gui.Components as Components
 import Gui.Globals as Globals
 
 
-// PoC1: charge and multiplicity are shown from the sample, not editable yet.
+// Charge and multiplicity. The multiplicity list holds only what the electron count allows;
+// a charge that changes the parity moves the multiplicity to the lowest allowed one.
 Column {
     spacing: EaStyle.Sizes.fontPixelSize
 
@@ -15,24 +16,25 @@ Column {
         text: qsTr('Charge:')
         EaElements.TextField {
             width: parent.width
-            enabled: false
             horizontalAlignment: TextInput.AlignLeft
+            validator: IntValidator { bottom: -99; top: 99 }
             text: Globals.BackendWrapper.sampleCharge
+            onEditingFinished: {
+                Globals.BackendWrapper.sampleSetCharge(parseInt(text))
+                text = Qt.binding(() => Globals.BackendWrapper.sampleCharge)  // a refused charge shows the old one
+            }
         }
     }
 
     Components.LabelledField {
         text: qsTr('Multiplicity:')
-        EaElements.TextField {
+        Components.ChoiceComboBox {
             width: parent.width
-            enabled: false
-            horizontalAlignment: TextInput.AlignLeft
-            text: multiplicityLabel(Globals.BackendWrapper.sampleMultiplicity)
+            // ChoiceComboBox compares string values
+            choices: Array.from(Globals.BackendWrapper.sampleMultiplicityChoices,
+                                choice => ({ value: String(choice.value), label: choice.label }))
+            value: String(Globals.BackendWrapper.sampleMultiplicity)
+            onSelected: (value) => Globals.BackendWrapper.sampleSetMultiplicity(parseInt(value))
         }
-    }
-
-    function multiplicityLabel(value) {
-        const names = ['', 'singlet', 'doublet', 'triplet', 'quartet', 'quintet']
-        return value < names.length ? `${value} (${names[value]})` : `${value}`
     }
 }

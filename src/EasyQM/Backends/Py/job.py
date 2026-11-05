@@ -7,8 +7,12 @@ Everything engine-specific comes from the adapter, everything about the process 
 Qt-free `logic.runner.JobRunner`. This class only adds a timer that follows the output file.
 """
 
+import hashlib
+import json
+import logging
 import tempfile
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
@@ -19,7 +23,9 @@ from PySide6.QtCore import QTimer
 from PySide6.QtCore import Signal
 from PySide6.QtCore import Slot
 
+from .logic.calculations import info
 from .logic.engines.base import EngineAdapter
+from .logic.method import describe
 from .logic.runner import JobRunner
 from .logic.runner import JobState
 from .logic.runner import new_run_folder
@@ -29,6 +35,30 @@ POLL_INTERVAL_MS = 500
 _MARKER_OVERLAP = 200
 # Where runs go while no project has been created (see the Project page hint).
 SCRATCH_ROOT = Path(tempfile.gettempdir()) / 'EasyQM'
+
+_log = logging.getLogger(__name__)
+
+
+def configuration(sample, calculations, method, settings) -> dict:
+    """Short hashes of what a job is computed from, to tell whether results belong to the
+    current setup: {'sample', 'calculations', 'method'}."""
+    sample_state = {
+        'atoms': [(a.element, round(a.x, 4), round(a.y, 4), round(a.z, 4), a.fixed) for a in sample.atoms],
+        'cell': sample.cell.vectors if sample.cell else None,
+        'state': (sample.charge, sample.multiplicity),
+    }
+    calculations_state = {
+        'steps': [step.value for step in calculations.workflow()],
+        'options': [asdict(calculations.single_point), asdict(calculations.geometry_optimisation),
+                    asdict(calculations.vibrational_frequencies)],
+    }
+    method_state = {'method': asdict(method), 'settings': asdict(settings)}
+    return {name: _digest(state) for name, state in
+            (('sample', sample_state), ('calculations', calculations_state), ('method', method_state))}
+
+
+def _digest(state) -> str:
+    return hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
 class Job(QObject):
@@ -74,6 +104,7 @@ class Job(QObject):
         self._step_failed = False  # the output shows the step failed, so it stays the current one
         self._started = 0.0
         self._stopping = False
+        self._record: Optional[dict] = None  # what the job that runs or ran last was computed from
 
         self._timer = QTimer(self)
         self._timer.setInterval(POLL_INTERVAL_MS)
@@ -160,11 +191,8 @@ class Job(QObject):
             return
         self._steps, self._step, self._step_failed = [], 0, False
         try:
-            if not self._executable:
-                raise RuntimeError(f'{self._adapter.name} was not found. Configure its path first.')
-            files = self._adapter.input_files(self._sample, self._calculations, self._method, self._settings)
-            commands = self._adapter.commands(self._executable, list(files))
-            folder = new_run_folder(Path(self._root) if self._root else SCRATCH_ROOT)
+            files, commands = self._prepare()
+            folder = new_run_folder(self.runs_root)
             for name, text in files.items():
                 (folder / name).write_text(text, encoding='utf-8')
             input_path = folder / next(iter(files))
@@ -174,13 +202,65 @@ class Job(QObject):
             self._job_adapter = self._adapter
             self._runner.start(commands, folder, output_path)
             self._steps = self._calculations.workflow()
-        except (RuntimeError, ValueError, OSError) as error:
-            self._set_state(JobState.FAILED, str(error))
+        except Exception as error:
+            self._set_state(JobState.FAILED, _problem(error))
             return
+        self._record = {
+            'run_id': folder.name,
+            'folder': str(folder),
+            'engine': self._adapter.name,
+            'method': describe(self._method, self._adapter.capabilities()),
+            'calculations': [info(step).name for step in self._steps],
+            'configuration': configuration(self._sample, self._calculations, self._method, self._settings),
+            'geometry_applied': False,
+        }
         self._started = time.monotonic()
         self._stopping = False
         self._set_state(JobState.RUNNING, f'Running {self._adapter.name}, serial')
         self._timer.start()
+
+    def preflight(self) -> str:
+        """Why a job could not start now (input generation, executables), or ''. Starts nothing."""
+        try:
+            self._prepare()
+        except Exception as error:
+            return _problem(error)
+        return ''
+
+    def _prepare(self) -> tuple[dict, list]:
+        if not self._executable:
+            raise RuntimeError(f'{self._adapter.name} was not found. Configure its path first.')
+        files = self._adapter.input_files(self._sample, self._calculations, self._method, self._settings)
+        return files, self._adapter.commands(self._executable, list(files))
+
+    # Provenance and output, for the assistant
+
+    @property
+    def runs_root(self) -> Path:
+        """Where the next run folder goes: the project folder, or the scratch folder without a project."""
+        return Path(self._root) if self._root else SCRATCH_ROOT
+
+    @property
+    def record(self) -> Optional[dict]:
+        """{run_id, folder, engine, method, calculations, configuration, geometry_applied} of the
+        job that runs or ran last; None before any."""
+        return dict(self._record) if self._record else None
+
+    def mark_geometry_applied(self, sample_configuration: str) -> None:
+        """The sample moved to the optimised geometry: the results describe it again."""
+        if self._record:
+            self._record['configuration'] = {**self._record['configuration'], 'sample': sample_configuration}
+            self._record['geometry_applied'] = True
+
+    def tail(self, max_chars: int) -> str:
+        """The last `max_chars` characters of the output, without joining all of it."""
+        parts, size = [], 0
+        for chunk in reversed(self._chunks):
+            parts.append(chunk[-(max_chars - size):])
+            size += len(parts[-1])
+            if size >= max_chars:
+                break
+        return ''.join(reversed(parts))
 
     def reset(self) -> None:
         """No job run yet, as at start-up (for PyBackend.reset); refused while one runs. The
@@ -189,6 +269,7 @@ class Job(QObject):
             return
         self._steps, self._step, self._step_failed = [], 0, False
         self._job_adapter = self._adapter
+        self._record = None
         self._set_files_paths('', '', '')
         self._clear_output()
         self._set_state(JobState.IDLE, '')
@@ -261,3 +342,11 @@ def _duration(seconds: float) -> str:
         return f'{minutes} min {seconds:02d} s'
     hours, minutes = divmod(minutes, 60)
     return f'{hours} h {minutes:02d} min'
+
+
+def _problem(error: Exception) -> str:
+    """The message for a job that could not start; an unexpected error is logged in full."""
+    if isinstance(error, (RuntimeError, ValueError, OSError)):
+        return str(error)
+    _log.exception('Unexpected error while preparing a job')
+    return f'Unexpected {type(error).__name__} while preparing the job: {error}'

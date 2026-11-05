@@ -70,6 +70,8 @@ class EngineAdapter(ABC):
     step_markers: dict[CalculationType, re.Pattern] = {}
     # Output text that shows the current step failed, although its program or the next goes on.
     failure_marker: Optional[re.Pattern] = None
+    # Whether the input reads the memory run setting (the assistant refuses settings an engine ignores).
+    uses_memory = False
 
     @abstractmethod
     def detect(self) -> EngineInfo: ...

@@ -98,9 +98,14 @@ class Calculations(QObject):
     @Slot(str, bool)
     def setSelected(self, calculation: str, value: bool) -> None:
         calculation = CalculationType(calculation)
-        if self._logic.is_selected(calculation) == bool(value):
+        selected = set(self._logic.selected)
+        self.set_selection(selected | {calculation} if value else selected - {calculation})
+
+    def set_selection(self, calculations: set) -> None:
+        """Select exactly these `CalculationType`s, with one change notification."""
+        if set(calculations) == self._logic.selected:
             return
-        self._logic.set_selected(calculation, bool(value))
+        self._logic.selected = set(calculations)
         self.selectionChanged.emit()
         self.workflowChanged.emit()
         self.externalSelectionChanged.emit()
