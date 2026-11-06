@@ -327,10 +327,13 @@ class Sample:
         self._electrons_changed()
 
     def _electrons_changed(self) -> None:
-        """Atoms came or went: a multiplicity the electron count no longer allows (a singlet
-        of an odd count) goes to the lowest one it allows."""
-        if (self.multiplicity - 1) % 2 != self._electrons() % 2:
-            self.multiplicity = 1 + self._electrons() % 2
+        """Atoms came or went: a charge that leaves fewer than no electrons goes back to 0, and a
+        multiplicity the electron count no longer allows goes to the lowest one it allows."""
+        if self._electrons() < 0:
+            self.charge = 0
+        allowed = self.multiplicities()
+        if self.multiplicity not in allowed:
+            self.multiplicity = allowed[0]
 
     def set_cell_parameters(self, a, b, c, alpha, beta, gamma) -> None:
         """Give a crystal a cell of these lengths (Å) and angles (°). The atoms keep their

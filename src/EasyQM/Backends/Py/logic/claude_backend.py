@@ -5,8 +5,9 @@
 Qt-free. `Turn.run` runs on a worker thread: it streams the model's text to `on_text`, hands
 each tool call to `dispatch` (answered on the main thread, after the user's approval where
 needed) and returns the messages to append to the conversation. The conversation is
-append-only: the workspace snapshot of a turn is a turn-scoped system message that stays in
-the history, so earlier thinking blocks and the prompt cache stay valid.
+append-only: the workspace snapshot is a turn-scoped system message that stays in the history,
+so earlier thinking blocks and the prompt cache stay valid. A tool round ends the scope of the
+snapshot before it, so each later request of the turn gets a fresh one (from `refresh`).
 
 The `anthropic` package is imported only in `make_client` and `describe_error`, so this module
 and the rest of the application load without it.
@@ -20,12 +21,14 @@ import time
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Callable
+from typing import Optional
 
 DEFAULT_MODEL = 'claude-opus-5-5'
 MODEL_CHOICES = ('claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5')
 EFFORT_CHOICES = ('low', 'medium', 'high')
-MAX_OUTPUT_TOKENS = 8000
-# Per user turn: requests to the model, tool calls, seconds.
+MAX_OUTPUT_TOKENS = 32000  # thinking counts towards it; effort and the turn limits bound the cost
+# Per user turn: requests to the model, tool calls, and seconds spent waiting for the model (tool
+# calls, and the user deciding on an approval, do not count).
 MAX_REQUESTS = 6
 MAX_TOOL_CALLS = 12
 MAX_SECONDS = 240
@@ -105,21 +108,24 @@ class TurnResult:
     error: str = ''
     usage: dict = field(default_factory=lambda: dict.fromkeys(USAGE_KEYS, 0))
     model: str = ''  # the model that answered, which a fallback can change
+    refused: bool = False  # the text streamed for the last request is to be dropped
 
 
 # dispatch(call id, tool name, input) -> (status, text, is_error), on the worker thread
 Dispatch = Callable[[str, str, dict], tuple[str, str, bool]]
+# refresh() -> the current snapshot text, or None when the turn was cancelled meanwhile
+Refresh = Callable[[], Optional[str]]
 
 
 class Turn:
     """One user turn: requests to the model and its tool calls until it answers."""
 
     def __init__(self, client, model: str, effort: str, tools: list, history: list, question: list,
-                 facts: str, dispatch: Dispatch, on_text: Callable[[str], None]):
+                 facts: str, dispatch: Dispatch, on_text: Callable[[str], None], refresh: Refresh):
         self._client, self._model, self._effort, self._tools = client, model, effort, tools
         self._history = list(history)
         self._question, self._facts = question, facts  # user content blocks; snapshot text
-        self._dispatch, self._on_text = dispatch, on_text
+        self._dispatch, self._on_text, self._refresh = dispatch, on_text, refresh
         self.cancelled = threading.Event()
         self._stream = None
 
@@ -138,20 +144,34 @@ class Turn:
                        {'role': 'system', 'clear_at': 'next_user_message', 'content': self._facts}]
         else:
             pending = [{'role': 'user', 'content': [*self._question, {'type': 'text', 'text': self._facts}]}]
-        result, calls, started = TurnResult([]), 0, time.monotonic()
+        result, calls, model_seconds = TurnResult([]), 0, 0.0
         try:
             for _ in range(MAX_REQUESTS):
                 if self.cancelled.is_set():
                     result.note = 'Cancelled.'
                     break
-                if time.monotonic() - started > MAX_SECONDS:
+                if model_seconds > MAX_SECONDS:
                     result.note = 'Stopped: this turn took too long.'
                     break
+                if pending[-1]['role'] == 'user' and pending[-1]['content'][0]['type'] == 'tool_result':
+                    # A tool round ended the scope of the snapshot before it.
+                    facts = self._refresh()
+                    if facts is None:
+                        result.note = 'Cancelled.'
+                        break
+                    _add_snapshot(policy, pending, facts)
+                started = time.monotonic()
                 message = self._request(policy, self._history + pending)
+                model_seconds += time.monotonic() - started
                 if message is None:
                     result.note = 'Cancelled.'
                     break
                 _count(result, message)
+                if message.stop_reason == 'refusal' or not message.content:
+                    # Neither an empty answer nor the part before a refusal may stay in the history.
+                    result.messages, result.refused = _answered(pending), True
+                    result.note = _STOP_NOTES.get(message.stop_reason) or 'The model gave no answer.'
+                    break
                 pending.append({'role': 'assistant', 'content': message.content})
                 uses = [block for block in message.content if block.type == 'tool_use']
                 if message.stop_reason != 'tool_use':
@@ -228,6 +248,23 @@ def _with_breakpoint(messages: list) -> list:
     return messages
 
 
+def _add_snapshot(policy: ModelPolicy, pending: list, facts: str) -> None:
+    """The current workspace for the next request, after the tool results: a turn-scoped system
+    message, or for a model without them a text block in the results message, not sent yet."""
+    if policy.system_messages:
+        pending.append({'role': 'system', 'clear_at': 'next_user_message', 'content': facts})
+    else:
+        pending[-1] = {**pending[-1], 'content': [*pending[-1]['content'], {'type': 'text', 'text': facts}]}
+
+
+def _answered(pending: list) -> list:
+    """What stays of a turn whose last request got no answer: a snapshot at the end would come
+    right before the next question (a 400), and a question nobody answered is dropped."""
+    while pending and pending[-1]['role'] == 'system':
+        pending = pending[:-1]
+    return pending if any(message['role'] == 'assistant' for message in pending) else []
+
+
 def _not_executed(uses: list, text: str) -> dict:
     return {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': use.id, 'content': text} for use in uses]}
 
@@ -240,6 +277,9 @@ def _count(result: TurnResult, message) -> None:
 
 def describe_error(error: Exception) -> str:
     """What to tell the user about a failed request."""
+    if isinstance(error, TypeError) and 'resolve authentication' in str(error):  # from the SDK's client
+        return ('No usable credential: the Anthropic CLI profile gave none. '
+                'Enter an API key in the assistant settings, or turn on offline mode.')
     # An SDK error comes from an imported SDK; importing it here would only cost seconds.
     anthropic = sys.modules.get('anthropic')
     if anthropic is None:

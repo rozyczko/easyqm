@@ -58,6 +58,13 @@ class RunSettings:
     memory_gb: int = 16
 
 
+def reference_problem(reference: str, multiplicity: int) -> str:
+    """Why this reference cannot describe this multiplicity, or '' if it can."""
+    if multiplicity > 1 and reference == 'RKS':
+        return f'Multiplicity {multiplicity} needs an open-shell reference, not RKS.'
+    return ''
+
+
 def describe(method: Method, capabilities) -> str:
     """Short level-of-theory label with display names, e.g. 'B3LYP-D3(BJ)/def2-TZVP'."""
     if method.family == 'HF':

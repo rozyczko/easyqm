@@ -307,6 +307,7 @@ QtObject {
     readonly property string assistantSettingsKeyStorage: activeBackend.assistant.settings.keyStorage
     readonly property bool assistantSettingsSecureStoreAvailable: activeBackend.assistant.settings.secureStoreAvailable
     readonly property bool assistantSettingsSdkAvailable: activeBackend.assistant.settings.sdkAvailable
+    function assistantSettingsCheckSecureStore() { activeBackend.assistant.settings.checkSecureStore() }
     function assistantSettingsSetKey(key, remember) { activeBackend.assistant.settings.setKey(key, remember) }
     function assistantSettingsClearKey() { activeBackend.assistant.settings.clearKey() }
     // Answer comes as assistantSettingsVerified(message)

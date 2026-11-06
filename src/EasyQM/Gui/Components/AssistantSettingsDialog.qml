@@ -23,6 +23,7 @@ EaElements.Dialog {
     onOpened: {
         keyField.text = ''
         verifyMessage = ''
+        Globals.BackendWrapper.assistantSettingsCheckSecureStore()  // not at start-up: it writes to the store
     }
 
     Connections {
@@ -54,7 +55,7 @@ EaElements.Dialog {
 
         EaElements.CheckBox {
             id: rememberBox
-            checked: true
+            checked: Globals.BackendWrapper.assistantSettingsSecureStoreAvailable  // plain text only on request
             text: Globals.BackendWrapper.assistantSettingsSecureStoreAvailable ?
                       qsTr('Remember it in the system credential store') :
                       qsTr('Remember it in the settings file, as plain text')

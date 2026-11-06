@@ -8,12 +8,15 @@ import json
 import os
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QSettings
 
 import Backends.Py.assistant_settings as assistant_settings
+import Backends.Py.logic.claude_backend as claude_backend
+import Backends.Py.workspace as workspace_module
 from Backends.Py.assistant import Assistant
 from Backends.Py.assistant_settings import KEYRING_SERVICE
 from Backends.Py.assistant_settings import KEYRING_USER
@@ -26,6 +29,7 @@ from Backends.Py.logic.calculations import CalculationType
 from Backends.Py.logic.claude_backend import FALLBACK_BETA
 from Backends.Py.logic.claude_backend import MAX_REQUESTS
 from Backends.Py.logic.claude_backend import SYSTEM_MESSAGES_BETA
+from Backends.Py.logic.claude_backend import describe_error
 from Backends.Py.logic.results import Results as ResultsLogic
 from Backends.Py.logic.sample import STRUCTURES_DIR
 from Backends.Py.method import Method
@@ -106,6 +110,26 @@ def test_electronic_state_follows_the_electron_count(qcore_application):
     assert 'fewer than no electrons' in sample.logic.electronic_state_problem(50, 1)
 
 
+def test_a_refused_or_unchanged_charge_is_no_edit(qcore_application):
+    sample = Sample()  # benzene: 42 electrons
+    changed = emissions(sample.electronicStateChanged)
+    sample.setCharge(0)  # the field lost focus without an edit
+    sample.setCharge(50)  # fewer than no electrons: refused
+    assert changed == [] and sample.charge == 0
+    sample.setCharge(1)
+    assert len(changed) == 1
+
+
+def test_atoms_that_go_leave_an_electronic_state_the_electrons_allow(qcore_application):
+    # A septet kept for two atoms; a charge of +4 kept for one.
+    for (charge, multiplicity), keep in (((0, 7), 2), ((4, 1), 1)):
+        sample = Sample()  # benzene
+        sample.set_electronic_state(charge, multiplicity)
+        sample.remove_atoms(list(range(len(sample.atoms) - keep)))
+        logic = sample.logic
+        assert logic.electronic_state_problem(logic.charge, logic.multiplicity) == '', (charge, multiplicity)
+
+
 def test_fixing_atoms_by_index_ignores_the_selection(qcore_application):
     sample = Sample()
     sample.selectAtom(0, 'only')
@@ -148,6 +172,15 @@ def test_job_preflight_and_unexpected_input_errors(parts, qcore_application):
     assert job.state == 'failed' and 'Unexpected KeyError' in job.message and job.record is None
 
 
+def test_a_run_needs_an_electronic_state_its_reference_describes(parts):
+    parts.calculations.setSelected('single_point', True)
+    parts.sample.setCharge(1)  # a doublet, which the default RKS reference cannot describe
+    assert parts.method.reference == 'RKS'
+    assert 'needs an open-shell reference, not RKS' in parts.job.preflight()
+    parts.method.setReference('UKS')
+    assert parts.job.preflight() == ''
+
+
 def test_job_records_what_it_was_computed_from(parts, qcore_application):
     parts.calculations.setSelected('single_point', True)
     parts.job.run()
@@ -173,6 +206,15 @@ def test_snapshot_separates_application_facts_from_file_data(parts):
     # Labels and the structure file name are data, never part of the operator facts.
     assert '"label"' not in facts_text(facts) and 'structure_file' not in json.dumps(facts)
     assert data_text(data).startswith('<data origin="workspace">')
+
+
+def test_messages_for_the_model_show_the_home_folder_as_tilde(parts, monkeypatch):
+    home = Path.home()
+    parts.calculations.setSelected('single_point', True)
+    monkeypatch.setattr(parts.job, 'preflight', lambda: f'No pseudopotential for Na in {home / "pseudo"}.')
+    text = _run(parts.workspace, 'run_workflow', {}).text
+    assert str(home) not in text and f'~{os.sep}pseudo' in text
+    assert workspace_module._home_text(f'{str(home).upper()}/a and {home.as_posix()}/b') == '~/a and ~/b'
 
 
 def test_engine_output_is_not_shared_when_turned_off(parts, qcore_application):
@@ -481,9 +523,10 @@ class FakeClient:
 
 class FakeKeyring:
     def __init__(self, works=True):
-        self.store, self.works = {}, works
+        self.store, self.works, self.writes = {}, works, 0
 
     def set_password(self, service, user, value):
+        self.writes += 1
         if not self.works:
             raise RuntimeError('no backend')
         self.store[(service, user)] = value
@@ -502,6 +545,7 @@ def chat(parts, tmp_path, monkeypatch):
     settings = AssistantSettings(_settings(tmp_path), FakeKeyring())
     settings.setKey('sk-test', False)
     assistant = Assistant(parts.workspace, settings, delay_ms=10)
+    assistant._disclosed = True  # the user agreed to share; test_the_first_question_waits_for_consent covers it
     parts.assistant, parts.settings = assistant, settings
 
     def script(*replies, gate=None):
@@ -531,8 +575,8 @@ def test_a_turn_runs_tools_and_keeps_the_conversation_append_only(chat, qcore_ap
     _turn(chat, 'Use cc-pVDZ', qcore_application)
     assert chat.method.basisSet == 'cc-pVDZ'
     roles = [item['role'] for item in chat.assistant.messages]
-    assert roles == ['user', 'notice', 'assistant', 'action', 'assistant']  # notice: what is sent, once
-    assert chat.assistant.messages[3]['text'] == 'basis_set: def2-TZVP → cc-pVDZ.'
+    assert roles == ['user', 'assistant', 'action', 'assistant']
+    assert chat.assistant.messages[2]['text'] == 'basis_set: def2-TZVP → cc-pVDZ.'
 
     first, second = client.requests[0], client.requests[1]
     assert first['model'] == 'claude-opus-5-5' and first['output_config'] == {'effort': 'medium'}
@@ -541,14 +585,19 @@ def test_a_turn_runs_tools_and_keeps_the_conversation_append_only(chat, qcore_ap
     assert snapshot['role'] == 'system' and snapshot['clear_at'] == 'next_user_message'
     assert 'basis_set_choices' in snapshot['content'] and '<data' in first['messages'][0]['content'][1]['text']
     assert second['messages'][3]['content'][0]['content'] == 'basis_set: def2-TZVP → cc-pVDZ.'
+    # The tool results end the first snapshot's scope: the next request gets the workspace as it is now.
+    fresh = second['messages'][4]
+    assert fresh['role'] == 'system' and fresh['clear_at'] == 'next_user_message'
+    assert '"basis_set": "cc-pVDZ"' in fresh['content'] and '"basis_set": "def2-TZVP"' in snapshot['content']
 
     _turn(chat, 'Which basis?', qcore_application)
     third = client.requests[2]['messages']
-    assert [m['role'] for m in third] == ['user', 'system', 'assistant', 'user', 'assistant', 'user', 'system']
+    assert [m['role'] for m in third] == ['user', 'system', 'assistant', 'user', 'system', 'assistant', 'user', 'system']
     questions = [m['content'][0]['text'] for m in third if m['role'] == 'user' and m['content'][0]['type'] == 'text']
     assert questions == ['Use cc-pVDZ', 'Which basis?']
-    assert third[1] is client.requests[0]['messages'][1]  # the first snapshot, kept as sent
-    assert 'cache_control' in third[5]['content'][-1] and 'cache_control' not in third[0]['content'][-1]
+    assert third[1] is client.requests[0]['messages'][1]  # the snapshots, kept as sent
+    assert third[4] is second['messages'][4]
+    assert 'cache_control' in third[6]['content'][-1] and 'cache_control' not in third[0]['content'][-1]
     assert chat.assistant.usageText.startswith('300 input, 150 cached, 30 written to cache and 15 output')
 
 
@@ -587,6 +636,42 @@ def test_an_approved_run_starts_unless_the_setup_changed(chat, qcore_application
     assert chat.job.running and chat.job.record['configuration']['method']
 
 
+def test_an_approval_is_stale_once_a_job_started_meanwhile(chat, qcore_application):
+    chat.calculations.setSelected('single_point', True)
+    chat.adapter.script = SLOW_SCRIPT
+    client = chat.script(_message(_tool('t1', 'run_workflow', {}), stop='tool_use'), _message(_text('It runs.')))
+    chat.assistant.send('Run it')
+    _wait(lambda: chat.assistant.approval, qcore_application)
+    chat.job.run()  # the user starts it by hand while the card waits
+    run_id = chat.job.record['run_id']
+    chat.assistant.answerApproval(chat.assistant.approval['id'], True)
+    _wait(lambda: not chat.assistant.busy, qcore_application)
+    assert 'job changed while this waited' in client.requests[1]['messages'][3]['content'][0]['content']
+    assert chat.job.running and chat.job.record['run_id'] == run_id  # not a second run
+
+
+def test_an_error_in_a_tool_call_fails_the_call_not_the_turn(chat, qcore_application, monkeypatch):
+    client = chat.script(_message(_tool('t1', 'set_method', {'basis_set': 'x'}), stop='tool_use'), _message(_text('Sorry.')))
+    monkeypatch.setattr(chat.workspace, 'prepare', lambda name, args: {}['boom'])  # a bug, as a KeyError
+    _turn(chat, 'Use x', qcore_application)
+    result = client.requests[1]['messages'][3]['content'][0]
+    assert result['content'] == "set_method failed: 'boom'" and result['is_error']
+    assert chat.assistant.messages[-1]['text'] == 'Sorry.'
+
+
+def test_waiting_for_an_approval_does_not_count_towards_the_time_limit(chat, qcore_application, monkeypatch):
+    monkeypatch.setattr(claude_backend, 'MAX_SECONDS', 0.3)
+    chat.settings.setApprovalMode('every')
+    client = chat.script(_message(_tool('t1', 'set_method', {'basis_set': 'def2-SVP'}), stop='tool_use'),
+                         _message(_text('Changed.')))
+    chat.assistant.send('Change it')
+    _wait(lambda: chat.assistant.approval, qcore_application)
+    time.sleep(0.5)  # the user reads the card for longer than the limit
+    chat.assistant.answerApproval(chat.assistant.approval['id'], True)
+    _wait(lambda: not chat.assistant.busy, qcore_application)
+    assert len(client.requests) == 2 and chat.assistant.messages[-1]['text'] == 'Changed.'
+
+
 def test_a_declined_action_skips_the_rest_of_its_step(chat, qcore_application):
     chat.settings.setApprovalMode('every')
     client = chat.script(
@@ -601,7 +686,7 @@ def test_a_declined_action_skips_the_rest_of_its_step(chat, qcore_application):
     results = client.requests[1]['messages'][3]['content']
     assert results[0]['content'].startswith('Not done: the user declined')
     assert results[1]['content'] == 'Not executed: an earlier action in this step was declined.'
-    again = client.requests[2]['messages'][5]['content'][0]['content']
+    again = client.requests[2]['messages'][6]['content'][0]['content']
     assert again == 'The user already declined this; it was not done.'  # no second card
     assert (chat.method.basisSet, chat.method.functional) == ('def2-TZVP', 'B3LYP')
 
@@ -639,6 +724,30 @@ def test_a_cut_off_tool_call_is_answered_without_running(chat, qcore_application
     assert chat.assistant.messages[-1]['text'] == 'The answer was cut off at the output limit.'
     _turn(chat, 'Again', qcore_application)
     assert client.requests[1]['messages'][3]['content'][0]['content'] == 'Not executed: the answer was cut off.'
+
+
+def test_a_refusal_leaves_no_empty_answer_in_the_conversation(chat, qcore_application):
+    chat.script(_message(stop='refusal'))  # before any output: no content at all
+    _turn(chat, 'First', qcore_application)
+    assert chat.assistant._history == [] and chat.assistant.messages[-1]['text'] == 'The model declined this request.'
+
+    client = chat.script(_message(_text('Looking.'), _tool('t1', 'get_workspace', {}), stop='tool_use'),
+                         _message(_text('Partial'), stop='refusal'), _message(_text('ok')))
+    _turn(chat, 'Second', qcore_application)
+    assert [m['role'] for m in chat.assistant._history] == ['user', 'system', 'assistant', 'user']  # no snapshot last
+    assert 'Partial' not in [item['text'] for item in chat.assistant.messages]  # the part before the refusal
+    _turn(chat, 'Third', qcore_application)
+    assert [m['role'] for m in client.requests[2]['messages']] == ['user', 'system', 'assistant', 'user', 'user', 'system']
+
+
+def test_without_system_messages_the_snapshot_follows_the_tool_results(chat, qcore_application):
+    chat.settings.setModel('some-new-model')
+    tool = _tool('t1', 'set_method', {'basis_set': 'cc-pVDZ'})
+    client = chat.script(_message(tool, stop='tool_use', model='some-new-model'),
+                         _message(_text('Done.'), model='some-new-model'))
+    _turn(chat, 'Use cc-pVDZ', qcore_application)
+    results = client.requests[1]['messages'][-1]['content']
+    assert results[0]['type'] == 'tool_result' and '"basis_set": "cc-pVDZ"' in results[-1]['text']
 
 
 def test_a_turn_ends_at_its_request_limit(chat, qcore_application):
@@ -679,6 +788,26 @@ def test_the_answering_model_is_shown(chat, qcore_application):
     assert chat.assistant.usageText.startswith('100 input, 50 cached, 10 written to cache and 5 output')
 
 
+def test_the_first_question_waits_for_consent(chat, qcore_application):
+    chat.assistant._disclosed = False  # a new session
+    client = chat.script(_message(_text('Hello.')), _message(_text('More.')))
+    chat.assistant.send('Hi')
+    card = chat.assistant.approval
+    assert card['id'] == 'disclosure' and card['confirm'] == 'Send' and 'the structure' in card['detail'][0]
+    assert not chat.assistant.busy and client.requests == []
+    chat.assistant.send('Again')  # nothing else goes while it waits
+    chat.assistant.answerApproval('disclosure', False)
+    assert client.requests == [] and chat.assistant.messages[-1]['text'] == 'Nothing was sent.'
+
+    chat.assistant.send('Hi')
+    chat.assistant.answerApproval('disclosure', True)
+    _wait(lambda: not chat.assistant.busy, qcore_application)
+    assert len(client.requests) == 1 and [item['role'] for item in chat.assistant.messages][-3:] == [
+        'user', 'notice', 'assistant']
+    _turn(chat, 'More?', qcore_application)  # once agreed, the next questions go at once
+    assert len(client.requests) == 2 and not chat.assistant.approval
+
+
 def test_offline_the_stub_answers(chat, qcore_application):
     chat.settings.setOffline(True)
     client = chat.script()
@@ -696,9 +825,9 @@ def test_show_page_reports_the_page_actually_shown(chat):
 
 
 def test_a_remembered_key_goes_to_the_credential_store(qcore_application, tmp_path, monkeypatch):
-    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
-    monkeypatch.delenv('ANTHROPIC_AUTH_TOKEN', raising=False)
-    monkeypatch.setattr(assistant_settings, 'CLI_PROFILE_DIR', tmp_path / 'none')
+    for name in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_PROFILE'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('ANTHROPIC_CONFIG_DIR', str(tmp_path / 'none'))
     keyring = FakeKeyring()
     settings = AssistantSettings(_settings(tmp_path), keyring)
     assert settings.keySource == '' and not settings.configured
@@ -713,6 +842,35 @@ def test_a_remembered_key_goes_to_the_credential_store(qcore_application, tmp_pa
 
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-env')
     assert settings.keySource == 'environment variable'
+
+
+def test_starting_writes_nothing_to_the_credential_store(qcore_application, tmp_path):
+    keyring = FakeKeyring()
+    settings = AssistantSettings(_settings(tmp_path), keyring)
+    assert not settings.secureStoreAvailable and keyring.writes == 0  # QML reads it at start-up
+    settings.checkSecureStore()  # the settings dialog opens
+    assert settings.secureStoreAvailable and keyring.writes == 1 and keyring.store == {}
+    settings.checkSecureStore()
+    assert keyring.writes == 1
+
+
+def test_a_cli_profile_counts_only_when_its_file_exists(qcore_application, tmp_path, monkeypatch):
+    for name in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_PROFILE'):
+        monkeypatch.delenv(name, raising=False)
+    folder = tmp_path / 'anthropic'
+    (folder / 'configs').mkdir(parents=True)  # a folder, but no profile in it
+    monkeypatch.setenv('ANTHROPIC_CONFIG_DIR', str(folder))
+    settings = AssistantSettings(_settings(tmp_path), FakeKeyring())
+    assert settings.keySource == ''
+    (folder / 'configs' / 'default.json').write_text('{}', encoding='utf-8')
+    assert settings.keySource == 'Anthropic CLI profile'
+    (folder / 'active_config').write_text('work\n', encoding='utf-8')  # the active profile has no file
+    assert settings.keySource == ''
+    monkeypatch.setenv('ANTHROPIC_PROFILE', 'default')
+    assert settings.keySource == 'Anthropic CLI profile'
+    # A profile that gives no credential after all: said as such, not as an unexpected error.
+    error = TypeError('Could not resolve authentication method. Expected one of api_key, auth_token, ...')
+    assert describe_error(error).startswith('No usable credential')
 
 
 def test_without_a_working_store_a_remembered_key_is_plain_text(qcore_application, tmp_path):
