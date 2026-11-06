@@ -7,6 +7,7 @@ import EasyApplication.Gui.Elements as EaElements
 import EasyApplication.Gui.Components as EaComponents
 
 import Gui as Gui
+import Gui.Components as Components
 import Gui.Globals as Globals
 
 EaComponents.ApplicationWindow {
@@ -73,9 +74,21 @@ EaComponents.ApplicationWindow {
     // Right group of application bar tool buttons
     appBarRightButtons: [
 
+        // The assistant panel (Components.AssistantPanel below); checked while it is open.
+        EaElements.ToolButton {
+            fontIcon: 'robot'
+            checked: assistantPanel.open
+            ToolTip.text: assistantPanel.open ?
+                              qsTr('Close the assistant (Ctrl+Shift+A)') :
+                              qsTr('Open the assistant (Ctrl+Shift+A)')
+            onClicked: assistantPanel.toggle()
+        },
+
+        // For now the only EasyQM preferences are the assistant's.
         EaElements.ToolButton {
             fontIcon: 'cog'
-            ToolTip.text: qsTr('Application preferences')
+            ToolTip.text: qsTr('Assistant settings')
+            onClicked: assistantSettingsDialog.open()
         },
 
         EaElements.ToolButton {
@@ -154,6 +167,36 @@ EaComponents.ApplicationWindow {
     /////////////
 
     statusBar: Gui.StatusBar {}
+
+    //////////////////
+    // ASSISTANT PANEL
+    //////////////////
+
+    // Slides in over the right of the current page, between the app bar and the status bar.
+    // One conversation for the whole workflow, so it lives here and not in a page.
+    Components.AssistantPanel {
+        id: assistantPanel
+        objectName: 'assistantPanel'
+
+        anchors.top: parent.top
+        anchors.topMargin: EaStyle.Sizes.appBarHeight
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: EaStyle.Sizes.statusBarHeight
+        z: 10
+
+        onSettingsRequested: assistantSettingsDialog.open()
+    }
+
+    Components.AssistantSettingsDialog {
+        id: assistantSettingsDialog
+        objectName: 'assistantSettingsDialog'
+    }
+
+    Shortcut {
+        sequence: 'Ctrl+Shift+A'
+        context: Qt.ApplicationShortcut
+        onActivated: assistantPanel.toggle()
+    }
 
     Component.onCompleted: {
         Globals.References.applicationWindow = applicationWindow

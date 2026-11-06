@@ -9,3 +9,5 @@ LogView LogView.qml
 StatTile StatTile.qml
 StickSpectrum StickSpectrum.qml
 MessageDialog MessageDialog.qml
+AssistantPanel AssistantPanel.qml
+AssistantSettingsDialog AssistantSettingsDialog.qml

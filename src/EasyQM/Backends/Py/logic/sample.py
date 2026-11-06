@@ -29,6 +29,8 @@ STRUCTURES_DIR = Path(__file__).resolve().parents[3] / 'Resources' / 'structures
 BENZENE = STRUCTURES_DIR / 'benzene.xyz'  # the sample at start-up and after a reset
 
 _BOND_TOLERANCE = 1.2
+MAX_FILE_BYTES = 20 * 1024 * 1024  # larger structure files are refused before reading
+MULTIPLICITY_NAMES = ('singlet', 'doublet', 'triplet', 'quartet', 'quintet', 'sextet', 'septet')
 _WRAP_TOLERANCE = 1e-6  # a fractional coordinate this close to 0 or 1 is 0
 _OCCUPANCY_TOLERANCE = 1e-3
 _SAME_POSITION = 1e-3  # Å; engines echo the input positions rounded
@@ -180,8 +182,40 @@ class Sample:
     def _element_counts(self) -> Counter:
         return Counter(atom.element for atom in self.atoms)
 
-    def _electrons(self) -> int:
-        return sum(atomic_number(atom.element) for atom in self.atoms) - self.charge
+    def _electrons(self, charge: Optional[int] = None) -> int:
+        return sum(atomic_number(atom.element) for atom in self.atoms) - (self.charge if charge is None else charge)
+
+    # Electronic state
+
+    def multiplicities(self, charge: Optional[int] = None) -> list[int]:
+        """The multiplicities the electron count allows, lowest first, up to a septet."""
+        electrons = self._electrons(charge)
+        return list(range(1 + electrons % 2, min(electrons + 1, len(MULTIPLICITY_NAMES)) + 1, 2))
+
+    def electronic_state_problem(self, charge: int, multiplicity: int) -> str:
+        """Why the electron count does not allow this pair, or '' if it does."""
+        if self._electrons(charge) < 0:
+            return f'A charge of {charge:+d} leaves fewer than no electrons.'
+        allowed = self.multiplicities(charge)
+        if multiplicity not in allowed:
+            return (f'With charge {charge:+d} the {self._electrons(charge)} electrons allow multiplicity '
+                    + ', '.join(map(str, allowed)) + f', not {multiplicity}.')
+        return ''
+
+    def set_electronic_state(self, charge: int, multiplicity: int) -> None:
+        """Set both together. :raises ValueError: for a pair the electron count does not allow;
+        nothing changes then."""
+        problem = self.electronic_state_problem(charge, multiplicity)
+        if problem:
+            raise ValueError(problem)
+        self.charge, self.multiplicity = charge, multiplicity
+
+    def set_charge(self, charge: int) -> None:
+        """Set the charge; a multiplicity the new electron count does not allow goes to the
+        lowest one it allows. :raises ValueError: as `set_electronic_state`."""
+        allowed = self.multiplicities(charge)
+        keep = self.multiplicity in allowed or not allowed
+        self.set_electronic_state(charge, self.multiplicity if keep else allowed[0])
 
     # Input
 
@@ -192,8 +226,12 @@ class Sample:
         the lowest one the electron count allows (singlet or doublet).
         """
         path = Path(path)
+        with path.open('rb') as file:
+            content = file.read(MAX_FILE_BYTES + 1)
+        if len(content) > MAX_FILE_BYTES:
+            raise ValueError(f'The file is larger than {MAX_FILE_BYTES // 1024 // 1024} MB.')
         try:
-            text = path.read_text(encoding='utf-8')
+            text = content.decode('utf-8')
         except UnicodeDecodeError:
             raise ValueError('The file is not a text file.')
         read = read_cif if path.suffix.lower() == '.cif' else read_xyz
@@ -289,10 +327,13 @@ class Sample:
         self._electrons_changed()
 
     def _electrons_changed(self) -> None:
-        """Atoms came or went: a multiplicity the electron count no longer allows (a singlet
-        of an odd count) goes to the lowest one it allows."""
-        if (self.multiplicity - 1) % 2 != self._electrons() % 2:
-            self.multiplicity = 1 + self._electrons() % 2
+        """Atoms came or went: a charge that leaves fewer than no electrons goes back to 0, and a
+        multiplicity the electron count no longer allows goes to the lowest one it allows."""
+        if self._electrons() < 0:
+            self.charge = 0
+        allowed = self.multiplicities()
+        if self.multiplicity not in allowed:
+            self.multiplicity = allowed[0]
 
     def set_cell_parameters(self, a, b, c, alpha, beta, gamma) -> None:
         """Give a crystal a cell of these lengths (Å) and angles (°). The atoms keep their

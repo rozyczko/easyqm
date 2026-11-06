@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Sample page backend part: the QML-facing proxy of `logic.sample.Sample`."""
 
+import contextlib
 import math
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Property
@@ -13,6 +15,7 @@ from PySide6.QtCore import Slot
 from .helpers import to_local_path
 from .logic.geometry import measure
 from .logic.sample import BENZENE
+from .logic.sample import MULTIPLICITY_NAMES
 from .logic.sample import Sample as SampleLogic
 from .logic.scene import HOME
 from .logic.scene import Image
@@ -27,7 +30,7 @@ from .logic.zmatrix import ZMatrix
 _COORDINATE_DECIMALS = 4
 _ANGLE_DECIMALS = 2
 _SELECTION_LABELS_SHOWN = 4
-_REPEAT_MAX = 4
+REPEAT_MAX = 4
 _CELL_PARAMETERS = ('a', 'b', 'c', 'alpha', 'beta', 'gamma')
 _UNCHANGED = 1e-9  # a typed value this close to the current one is no edit
 _NEW_ATOM_ELEMENT = 'C'
@@ -50,6 +53,8 @@ class Sample(QObject):
     viewChanged = Signal()
     # The Z-matrix rows: the structure or the coordinates shown changed.
     zmatrixChanged = Signal()
+    # Charge or multiplicity changed (also with every structure change).
+    electronicStateChanged = Signal()
     loadError = Signal(str)
 
     # For the other backend parts.
@@ -74,6 +79,8 @@ class Sample(QObject):
         self._zmatrix_error = ''
         self._zmatrix_stale = True
         self._construction = None
+        # Files the user picked in a file dialog this session (the assistant may load these).
+        self.picked_paths: set[Path] = set()
         self.atomsChanged.connect(self.sceneChanged)
 
     @property
@@ -133,13 +140,18 @@ class Sample(QObject):
     def pointGroupAtomLimit(self) -> int:
         return POINT_GROUP_ATOM_LIMIT
 
-    @Property(int, notify=sampleChanged)
+    @Property(int, notify=electronicStateChanged)
     def charge(self) -> int:
         return self._logic.charge
 
-    @Property(int, notify=sampleChanged)
+    @Property(int, notify=electronicStateChanged)
     def multiplicity(self) -> int:
         return self._logic.multiplicity
+
+    @Property('QVariantList', notify=electronicStateChanged)
+    def multiplicityChoices(self) -> list:
+        """[{value, label}] of the multiplicities the electron count allows: '1 (singlet)', …."""
+        return [{'value': m, 'label': f'{m} ({MULTIPLICITY_NAMES[m - 1]})'} for m in self._logic.multiplicities()]
 
     @Property('QVariantList', notify=atomsChanged)
     def atoms(self) -> list:
@@ -203,6 +215,11 @@ class Sample(QObject):
     def selectedAtoms(self) -> list:
         """Selected atom indices, each once, in the order picked."""
         return list(dict.fromkeys(index for index, _ in self._selected))
+
+    @property
+    def selection(self) -> list:
+        """(atom index, image) pairs as picked; the image tells which drawn copy of a crystal's atom."""
+        return list(self._selected)
 
     @Property('QVariantList', notify=selectionChanged)
     def selectedSceneAtoms(self) -> list:
@@ -289,14 +306,21 @@ class Sample(QObject):
 
     @Slot(str)
     def loadStructure(self, path: str) -> None:
+        """The file dialog's choice."""
         path = to_local_path(path)
+        self.picked_paths.add(Path(path).resolve())
+        error = self.load_file(path)
+        if error:
+            self.loadError.emit(f'"{path}" could not be read.\n\n{error}')
+
+    def load_file(self, path) -> str:
+        """Replace the structure with the one in the file. Returns why it could not be read, or ''."""
         try:
             self._logic.load(path)
         except (ValueError, OSError) as error:
-            reason = error.strerror if isinstance(error, OSError) and error.strerror else error
-            self.loadError.emit(f'"{path}" could not be read.\n\n{reason}')
-            return
+            return error.strerror if isinstance(error, OSError) and error.strerror else str(error)
         self._structure_replaced()
+        return ''
 
     def reset(self) -> None:
         """Back to the bundled benzene and the default view settings, as at start-up (for
@@ -359,7 +383,22 @@ class Sample(QObject):
         atom = self._logic.atoms[index]
         if all(math.isclose(old, new, abs_tol=_UNCHANGED) for old, new in zip((atom.x, atom.y, atom.z), position)):
             return
-        self._logic.set_position(index, position)
+        self.set_atom_positions({index: position})
+
+    def set_atom_positions(self, positions: dict, fractional: bool = False) -> None:
+        """Put atoms at new positions, {index: (x, y, z)}: Cartesian in Å, or fractional in a
+        crystal's cell. One notification for all of them.
+
+        :raises ValueError: for an index out of range, or fractional coordinates of a molecule;
+            nothing changes then.
+        """
+        count = self._logic.atom_count
+        if not all(0 <= index < count for index in positions):
+            raise ValueError(f'Atom indices run from 0 to {count - 1}.')
+        if fractional and not self._logic.periodic:
+            raise ValueError('A molecule has no fractional coordinates.')
+        for index, position in positions.items():
+            self._logic.set_position(index, tuple(position), fractional)
         self._structure_changed()
 
     @Slot(str, str)
@@ -373,10 +412,13 @@ class Sample(QObject):
         if math.isclose(parameters[name], value, abs_tol=_UNCHANGED):
             return
         parameters[name] = value
-        try:
-            self._logic.set_cell_parameters(**parameters)
-        except ValueError:
-            return
+        with contextlib.suppress(ValueError):
+            self.set_cell_parameters(parameters)
+
+    def set_cell_parameters(self, parameters: dict) -> None:
+        """Give a crystal's cell these a, b, c (Å), alpha, beta, gamma (°); the atoms keep their
+        fractional coordinates. :raises ValueError: for a molecule or values that make no cell."""
+        self._logic.set_cell_parameters(**parameters)
         self._structure_changed()
 
     @Slot(int, str, str)
@@ -384,35 +426,61 @@ class Sample(QObject):
         """Set the 'bond' (Å), 'angle' or 'dihedral' (°) of an atom in the Z-matrix: the atom
         moves, and with it the atoms placed from it."""
         value = _number(text)
+        if value is not None:
+            with contextlib.suppress(ValueError):
+                self.set_zmatrix_value(atom, field, value)
+
+    def set_zmatrix_value(self, atom: int, field: str, value: float) -> None:
+        """As `setZmatrixValue`, for a number.
+
+        :raises ValueError: when the tables show no Z-matrix, for an atom or field it does not
+            have, or for a value `ZMatrix.positions_with` refuses; nothing changes then.
+        """
         zmatrix = self._current_zmatrix()
-        if value is None or zmatrix is None or field not in ZMATRIX_FIELDS:
-            return
+        if zmatrix is None:
+            raise ValueError(self._zmatrix_error or 'The tables do not show the Z-matrix.')
+        if field not in ZMATRIX_FIELDS:
+            raise ValueError(f'The field is one of {", ".join(ZMATRIX_FIELDS)}.')
         try:
-            if math.isclose(zmatrix.row(atom).value(field), value, abs_tol=_UNCHANGED):
-                return
-            positions = zmatrix.positions_with(atom, field, value)
-        except (KeyError, ValueError):
+            current = zmatrix.row(atom).value(field)
+        except KeyError:
+            raise ValueError(f'Atom {atom} is not in the Z-matrix.') from None
+        if math.isclose(current, value, abs_tol=_UNCHANGED):
             return
-        self._logic.set_positions(positions)
+        self._logic.set_positions(zmatrix.positions_with(atom, field, value))
         self._structure_changed()
+
+    def zmatrix_rows(self) -> list:
+        """The Z-matrix rows (`logic.zmatrix.ZRow`) while the tables show it, [] otherwise."""
+        zmatrix = self._current_zmatrix()
+        return zmatrix.rows if zmatrix is not None else []
 
     @Slot()
     def addAtom(self) -> None:
         """Add a carbon atom at the origin, Cartesian (0, 0, 0) of a molecule or fractional
         [0, 0, 0] of a crystal, and select it alone, ready for its coordinates."""
-        index = self._logic.add_atom(_NEW_ATOM_ELEMENT, (0.0, 0.0, 0.0), fractional=self._logic.periodic)
+        self.add_atom(_NEW_ATOM_ELEMENT, (0.0, 0.0, 0.0), fractional=self._logic.periodic)
+
+    def add_atom(self, element: str, position, fractional: bool = False) -> int:
+        """Add an atom after the others, as `logic.Sample.add_atom`, and select it alone.
+        Returns its index. :raises ValueError: for an unknown element, or fractional coordinates
+        of a molecule; nothing changes then."""
+        index = self._logic.add_atom(element, tuple(position), fractional)
         self._selected, self._anchor = [(index, HOME)], index
         self._atom_count_changed()
+        return index
 
     @Slot()
     def removeSelectedAtoms(self) -> None:
         """Remove the selected atoms; refused when they are all the atoms."""
-        if not self._selected:
-            return
-        try:
-            self._logic.remove_atoms(self.selectedAtoms)
-        except ValueError:
-            return
+        if self._selected:
+            with contextlib.suppress(ValueError):
+                self.remove_atoms(self.selectedAtoms)
+
+    def remove_atoms(self, indices) -> None:
+        """Remove the atoms at `indices` and clear the selection. :raises ValueError: for an
+        index out of range, or if no atom would be left; nothing changes then."""
+        self._logic.remove_atoms(indices)
         self._selected, self._anchor = [], None
         self._atom_count_changed()
 
@@ -435,6 +503,7 @@ class Sample(QObject):
         self.atomsChanged.emit()
         self.zmatrixChanged.emit()
         self.selectionChanged.emit()
+        self.electronicStateChanged.emit()
         self.externalSampleChanged.emit()
 
     # Selection
@@ -468,6 +537,15 @@ class Sample(QObject):
         self._anchor = None
         self._set_selected([])
 
+    def select_atoms(self, indices) -> None:
+        """Select exactly these atoms, in their own cell; none clears the selection.
+        :raises ValueError: for an index out of range."""
+        count = self._logic.atom_count
+        if not all(0 <= index < count for index in indices):
+            raise ValueError(f'Atom indices run from 0 to {count - 1}.')
+        self._anchor = indices[-1] if indices else None
+        self._set_selected([(index, HOME) for index in dict.fromkeys(indices)])
+
     def _pick(self, entry: tuple[int, Image], mode: str) -> None:
         if mode == 'toggle':
             selected = [picked for picked in self._selected if picked != entry]
@@ -489,19 +567,50 @@ class Sample(QObject):
     def setAtomFixed(self, index: int, value: bool) -> None:
         """Fix or free this atom; for a selected atom, every selected atom."""
         selected = self.selectedAtoms
-        indices = selected if index in selected else [index]
-        atoms = [self._logic.atoms[i] for i in indices if self._logic.atoms[i].fixed != bool(value)]
-        if not atoms:
+        self.set_atoms_fixed(selected if index in selected else [index], value)
+
+    def set_atoms_fixed(self, indices, value: bool) -> list[int]:
+        """Fix or free exactly the atoms at `indices`, whatever is selected. Returns the indices
+        that changed. :raises ValueError: for an index out of range; nothing changes then."""
+        atoms = self._logic.atoms
+        if not all(0 <= index < len(atoms) for index in indices):
+            raise ValueError(f'Atom indices run from 0 to {len(atoms) - 1}.')
+        changed = [index for index in dict.fromkeys(indices) if atoms[index].fixed != bool(value)]
+        for index in changed:
+            atoms[index].fixed = bool(value)
+        if changed:
+            self.atomsChanged.emit()
+        return changed
+
+    @Slot(int)
+    def setCharge(self, charge: int) -> None:
+        """A multiplicity the new electron count does not allow goes to the lowest it allows. A
+        refused charge changes nothing: the field binds to the old one again."""
+        before = (self._logic.charge, self._logic.multiplicity)
+        with contextlib.suppress(ValueError):
+            self._logic.set_charge(int(charge))
+        if (self._logic.charge, self._logic.multiplicity) != before:
+            self.electronicStateChanged.emit()
+
+    @Slot(int)
+    def setMultiplicity(self, multiplicity: int) -> None:
+        try:
+            self.set_electronic_state(self._logic.charge, int(multiplicity))
+        except ValueError:
+            self.electronicStateChanged.emit()  # the combo shows the old multiplicity again
+
+    def set_electronic_state(self, charge: int, multiplicity: int) -> None:
+        """:raises ValueError: for a pair the electron count does not allow; nothing changes then."""
+        if (charge, multiplicity) == (self._logic.charge, self._logic.multiplicity):
             return
-        for atom in atoms:
-            atom.fixed = bool(value)
-        self.atomsChanged.emit()
+        self._logic.set_electronic_state(charge, multiplicity)
+        self.electronicStateChanged.emit()
 
     @Slot(int, int, int)
     def setViewRepeat(self, na: int, nb: int, nc: int) -> None:
         """Draw na × nb × nc cells, each 1 to 4; refused when the cells would hold more than
         SCENE_ATOM_LIMIT atoms (the controls then snap back)."""
-        repeat = tuple(max(1, min(_REPEAT_MAX, int(count))) for count in (na, nb, nc))
+        repeat = tuple(max(1, min(REPEAT_MAX, int(count))) for count in (na, nb, nc))
         if self._logic.atom_count * repeat[0] * repeat[1] * repeat[2] > SCENE_ATOM_LIMIT or repeat == self._repeat:
             self.viewChanged.emit()
             return
@@ -517,8 +626,7 @@ class Sample(QObject):
     @Slot(str)
     def setCoordinates(self, value: str) -> None:
         """'cartesian'; 'fractional' for a crystal; 'zmatrix' for a molecule."""
-        allowed = ('cartesian', 'fractional') if self._logic.periodic else ('cartesian', 'zmatrix')
-        if value in allowed and value != self._coordinates:
+        if value in self.coordinate_choices and value != self._coordinates:
             self._coordinates = value
             self.viewChanged.emit()
             self.zmatrixChanged.emit()
@@ -536,6 +644,10 @@ class Sample(QObject):
         self.viewChanged.emit()
         self.sceneChanged.emit()
         self.selectionChanged.emit()
+
+    @property
+    def coordinate_choices(self) -> tuple:
+        return ('cartesian', 'fractional') if self._logic.periodic else ('cartesian', 'zmatrix')
 
     def _default_coordinates(self) -> str:
         return 'fractional' if self._logic.periodic else 'cartesian'

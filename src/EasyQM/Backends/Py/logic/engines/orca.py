@@ -71,6 +71,7 @@ _MAXCORE_SHARE = 0.75
 class OrcaAdapter(EngineAdapter):
     name = 'ORCA'
     programs = ('orca',)
+    uses_memory = True  # %maxcore
     # The single point after an optimisation is its final energy evaluation; frequencies start
     # with the analytical Hessian's response calculation or the numerical displacements.
     step_markers = {

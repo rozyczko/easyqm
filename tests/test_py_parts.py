@@ -16,13 +16,9 @@ from PySide6.QtCore import QUrl
 from Backends.Py.calculations import Calculations
 from Backends.Py.job import Job
 from Backends.Py.logic.calculations import CalculationType
-from Backends.Py.logic.engines.base import Capabilities
-from Backends.Py.logic.engines.base import EngineAdapter
 from Backends.Py.logic.engines.base import EngineInfo
-from Backends.Py.logic.engines.orca import CAPABILITIES
 from Backends.Py.logic.engines.orca import OrcaAdapter
-from Backends.Py.logic.engines.quantum_espresso import CAPABILITIES as QE_CAPABILITIES
-from Backends.Py.logic.engines.quantum_espresso import QuantumEspressoAdapter
+from Backends.Py.logic.method import Method as MethodLogic
 from Backends.Py.logic.method import RunSettings
 from Backends.Py.logic.project import Project as ProjectLogic
 from Backends.Py.logic.results import Results as ResultsLogic
@@ -31,52 +27,10 @@ from Backends.Py.method import Method
 from Backends.Py.py_backend import PyBackend
 from Backends.Py.results import Results
 from Backends.Py.sample import Sample
-
-
-def _emissions(signal) -> list:
-    calls = []
-    signal.connect(lambda *args: calls.append(args))
-    return calls
-
-
-class FakeAdapter(EngineAdapter):
-    name = 'ORCA'
-
-    def __init__(self):
-        self.info = EngineInfo(found=False)
-
-    def detect(self) -> EngineInfo:
-        return self.info
-
-    def capabilities(self) -> Capabilities:
-        return CAPABILITIES
-
-
-class FakeCrystalAdapter(FakeAdapter):
-    name = 'Quantum ESPRESSO'
-    systems = ('crystal',)
-    programs = ('pw.x', 'pw')
-
-    def capabilities(self) -> Capabilities:
-        return QE_CAPABILITIES
-
-    def default_method(self):
-        return QuantumEspressoAdapter().default_method()
-
-
-class ScriptAdapter(FakeAdapter):
-    """Runs the input file as a Python script in place of an engine."""
-
-    def input_text(self, sample, calculations, method, settings) -> str:
-        if not calculations.workflow():
-            raise ValueError('No calculation is selected.')
-        return self.script
-
-    def command(self, executable, input_path):
-        return [sys.executable, input_path.name]
-
-    def succeeded(self, output: str) -> bool:
-        return 'DONE' in output
+from fakes import FakeAdapter
+from fakes import FakeCrystalAdapter
+from fakes import ScriptAdapter
+from fakes import emissions as _emissions
 
 
 def _settings(tmp_path) -> QSettings:
@@ -700,7 +654,7 @@ def _job(tmp_path, script: str, selected: bool = True) -> Job:
     adapter.script = script
     calculations = Calculations()
     calculations.setSelected('single_point', selected)
-    job = Job(adapter, Sample().logic, calculations.logic, None, RunSettings())
+    job = Job(adapter, Sample().logic, calculations.logic, MethodLogic(), RunSettings())
     job.set_executable('python')
     job.set_root_folder(str(tmp_path))
     return job

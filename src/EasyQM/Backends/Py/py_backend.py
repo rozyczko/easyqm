@@ -5,13 +5,16 @@ from PySide6.QtCore import QObject
 from PySide6.QtCore import Signal
 from PySide6.QtCore import Slot
 
+from .assistant import Assistant
 from .calculations import Calculations
 from .job import Job
+from .job import configuration
 from .logic.method import describe
 from .method import Method
 from .project import Project
 from .results import Results
 from .sample import Sample
+from .workspace import Workspace
 
 
 class PyBackend(QObject):
@@ -37,6 +40,8 @@ class PyBackend(QObject):
             parent=self,
         )
         self._results = Results(parent=self)
+        self._workspace = Workspace(self._project, self._sample, self._calculations, self._method, self._job, self._results)
+        self._assistant = Assistant(self._workspace, parent=self)
         # Changes since start-up or the last reset: to the parts, whose state the project file
         # does not hold, and to the project's own fields.
         self._parts_edited = False
@@ -68,6 +73,10 @@ class PyBackend(QObject):
     def results(self) -> Results:
         return self._results
 
+    @Property('QVariant', constant=True)
+    def assistant(self) -> Assistant:
+        return self._assistant
+
     # Reset (the app bar button)
 
     @Property(bool, notify=editedChanged)
@@ -86,6 +95,7 @@ class PyBackend(QObject):
         runs. The parts reset their objects in place: the job holds the logic objects."""
         if self._job.running:
             return
+        self._assistant.reset()  # first: no tool call may reach the parts while they reset
         self._project.reset()
         self._sample.reset()  # the relay also gives the method part the molecule
         self._calculations.reset()
@@ -101,6 +111,7 @@ class PyBackend(QObject):
         parts = (
             self._sample.externalSampleChanged,
             self._sample.atomsChanged,  # fixed flags
+            self._sample.electronicStateChanged,
             self._calculations.selectionChanged,
             self._calculations.singlePointChanged,
             self._calculations.optimisationChanged,
@@ -114,6 +125,7 @@ class PyBackend(QObject):
         )
         for signal in parts:
             signal.connect(self._part_edited)
+            signal.connect(self._assistant.refresh)
         for signal in (self._project.nameChanged, self._project.descriptionChanged):
             signal.connect(self._project_field_edited)
         for signal in (self._project.createdChanged, self._project.hasUnsavedChangesChanged):
@@ -178,4 +190,7 @@ class PyBackend(QObject):
             self._results.set_results(results)
             optimisation = results.optimisation
             if self._job.state == 'completed' and optimisation is not None and optimisation.converged:
-                self._sample.apply_optimisation(optimisation)
+                if self._sample.apply_optimisation(optimisation):
+                    current = configuration(self._sample.logic, self._calculations.logic, self._method.logic,
+                                            self._method.run_settings)
+                    self._job.mark_geometry_applied(current['sample'])

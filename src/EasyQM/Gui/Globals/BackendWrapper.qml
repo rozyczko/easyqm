@@ -67,6 +67,11 @@ QtObject {
     readonly property int samplePointGroupAtomLimit: activeBackend.sample.pointGroupAtomLimit
     readonly property int sampleCharge: activeBackend.sample.charge
     readonly property int sampleMultiplicity: activeBackend.sample.multiplicity
+    // [{value, label}] of the multiplicities the electron count allows
+    readonly property var sampleMultiplicityChoices: activeBackend.sample.multiplicityChoices
+    // A multiplicity the new charge does not allow goes to the lowest allowed one
+    function sampleSetCharge(value) { activeBackend.sample.setCharge(value) }
+    function sampleSetMultiplicity(value) { activeBackend.sample.setMultiplicity(value) }
     readonly property var sampleAtoms: activeBackend.sample.atoms
     readonly property int sampleFixedCount: activeBackend.sample.fixedCount
     // On a selected atom, fixes or frees every selected atom
@@ -249,6 +254,65 @@ QtObject {
     readonly property bool resultsHasRaman: activeBackend.results.hasRaman
     readonly property var resultsModes: activeBackend.results.modes
 
+    /////////////////////////////////////////////
+    // Assistant panel (toggled from the app bar)
+    /////////////////////////////////////////////
+    // The configured model, or the offline stub's name
+    readonly property string assistantModelName: activeBackend.assistant.modelName
+    // Whether turns go to the model (SDK installed, not offline, a credential found)
+    readonly property bool assistantConfigured: activeBackend.assistant.configured
+    // [{id, role: 'user' | 'assistant' | 'action' | 'notice' | 'error', text, ok, page}] in order
+    readonly property var assistantMessages: activeBackend.assistant.messages
+    readonly property int assistantMessageCount: activeBackend.assistant.messageCount
+    // A turn is in progress: sending is refused until it ends
+    readonly property bool assistantBusy: activeBackend.assistant.busy
+    // 'Thinking' | 'Waiting for your confirmation' | 'Cancelling' | ''
+    readonly property string assistantStatus: activeBackend.assistant.status
+    // The answer being written, before it becomes a message
+    readonly property string assistantStreamingText: activeBackend.assistant.streamingText
+    // {id, title, detail: [lines], confirm} of the action waiting for the user; {} when none
+    readonly property var assistantApproval: activeBackend.assistant.approval
+    // Questions offered for the current page and job state
+    readonly property var assistantSuggestions: activeBackend.assistant.suggestions
+    readonly property string assistantUsageText: activeBackend.assistant.usageText
+    // 'home' | 'project' | 'sample' | 'calculations' | 'method' | 'summary'
+    function assistantSetPage(name) { activeBackend.assistant.setPage(name) }
+    function assistantSend(text) { activeBackend.assistant.send(text) }
+    // Stops the answer being written; the conversation stays, a running job is not stopped
+    function assistantCancel() { activeBackend.assistant.cancel() }
+    function assistantClear() { activeBackend.assistant.clear() }
+    function assistantAnswerApproval(id, allowed) { activeBackend.assistant.answerApproval(id, allowed) }
+
+    // Assistant settings (the settings dialog)
+    readonly property string assistantSettingsModel: activeBackend.assistant.settings.model
+    readonly property var assistantSettingsModelChoices: activeBackend.assistant.settings.modelChoices
+    function assistantSettingsSetModel(value) { activeBackend.assistant.settings.setModel(value) }
+    readonly property string assistantSettingsEffort: activeBackend.assistant.settings.effort
+    readonly property var assistantSettingsEffortChoices: activeBackend.assistant.settings.effortChoices
+    function assistantSettingsSetEffort(value) { activeBackend.assistant.settings.setEffort(value) }
+    readonly property string assistantSettingsApprovalMode: activeBackend.assistant.settings.approvalMode
+    readonly property var assistantSettingsApprovalModeChoices: activeBackend.assistant.settings.approvalModeChoices
+    function assistantSettingsSetApprovalMode(value) { activeBackend.assistant.settings.setApprovalMode(value) }
+    readonly property bool assistantSettingsSendOutput: activeBackend.assistant.settings.sendOutput
+    function assistantSettingsSetSendOutput(value) { activeBackend.assistant.settings.setSendOutput(value) }
+    readonly property bool assistantSettingsSendResults: activeBackend.assistant.settings.sendResults
+    function assistantSettingsSetSendResults(value) { activeBackend.assistant.settings.setSendResults(value) }
+    readonly property bool assistantSettingsOffline: activeBackend.assistant.settings.offline
+    function assistantSettingsSetOffline(value) { activeBackend.assistant.settings.setOffline(value) }
+    // The key itself is never readable from QML
+    readonly property bool assistantSettingsHasKey: activeBackend.assistant.settings.hasKey
+    // 'assistant settings' | 'environment variable' | 'Anthropic CLI profile' | '' (none)
+    readonly property string assistantSettingsKeySource: activeBackend.assistant.settings.keySource
+    // 'session' | 'keyring' | 'settings' for a key entered here
+    readonly property string assistantSettingsKeyStorage: activeBackend.assistant.settings.keyStorage
+    readonly property bool assistantSettingsSecureStoreAvailable: activeBackend.assistant.settings.secureStoreAvailable
+    readonly property bool assistantSettingsSdkAvailable: activeBackend.assistant.settings.sdkAvailable
+    function assistantSettingsCheckSecureStore() { activeBackend.assistant.settings.checkSecureStore() }
+    function assistantSettingsSetKey(key, remember) { activeBackend.assistant.settings.setKey(key, remember) }
+    function assistantSettingsClearKey() { activeBackend.assistant.settings.clearKey() }
+    // Answer comes as assistantSettingsVerified(message)
+    function assistantSettingsVerify() { activeBackend.assistant.settings.verify() }
+
     // Signals forwarded from the backend
     signal projectSaved(string path)
     signal projectSaveError(string message)
@@ -256,6 +320,9 @@ QtObject {
     signal sampleLoadError(string message)
     signal sampleStructureLoaded()
     signal jobOutputAppended(string text)
+    signal assistantReplied()
+    signal assistantNavigateRequested(string page)
+    signal assistantSettingsVerified(string message)
 
     Component.onCompleted: {
         activeBackend.project.projectSaved.connect(projectSaved)
@@ -264,6 +331,9 @@ QtObject {
         activeBackend.sample.loadError.connect(sampleLoadError)
         activeBackend.sample.structureLoaded.connect(sampleStructureLoaded)
         activeBackend.job.outputAppended.connect(jobOutputAppended)
+        activeBackend.assistant.replied.connect(assistantReplied)
+        activeBackend.assistant.navigateRequested.connect(assistantNavigateRequested)
+        activeBackend.assistant.settings.verified.connect(assistantSettingsVerified)
     }
 
 }
