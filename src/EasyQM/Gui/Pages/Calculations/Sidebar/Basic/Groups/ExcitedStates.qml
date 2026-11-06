@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 
 import EasyApplication.Gui.Style as EaStyle
+import EasyApplication.Gui.Globals as EaGlobals
 import EasyApplication.Gui.Elements as EaElements
 
 import Gui.Components as Components
@@ -46,6 +47,7 @@ Column {
             text: Globals.BackendWrapper.calculationsExcOccupiedOrbitals
             onEditingFinished: Globals.BackendWrapper.calculationsSetExcOccupiedOrbitals(parseInt(text))
             ToolTip.text: qsTr('The highest occupied orbitals excitations start from; 0 leaves ORCA\'s choice, all but the core orbitals.')
+            ToolTip.visible: hovered && EaGlobals.Vars.showToolTips
         }
     }
 
@@ -59,6 +61,7 @@ Column {
             text: Globals.BackendWrapper.calculationsExcVirtualOrbitals
             onEditingFinished: Globals.BackendWrapper.calculationsSetExcVirtualOrbitals(parseInt(text))
             ToolTip.text: qsTr('The lowest virtual orbitals excitations end in; 0 for all of them.')
+            ToolTip.visible: hovered && EaGlobals.Vars.showToolTips
         }
     }
 

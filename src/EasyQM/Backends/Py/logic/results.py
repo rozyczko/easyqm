@@ -18,6 +18,9 @@ from .sample import find_bonds
 
 HARTREE_TO_KCAL_PER_MOL = 627.509474
 EV_NM = 1239.84198  # photon energy in eV times its wavelength in nm
+# Below this an excitation gets no wavelength: such a root is mostly the partner of a
+# degenerate ground state that an open-shell reference splits, and would stretch the spectrum.
+WAVELENGTH_FROM_EV = 1.0
 
 
 @dataclass(frozen=True)
@@ -85,8 +88,8 @@ class Excitation:
 
     @property
     def wavelength(self) -> Optional[float]:
-        """nm"""
-        return EV_NM / self.energy if self.energy > 0 else None
+        """nm; None below `WAVELENGTH_FROM_EV`."""
+        return EV_NM / self.energy if self.energy >= WAVELENGTH_FROM_EV else None
 
 
 @dataclass

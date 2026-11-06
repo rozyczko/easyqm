@@ -892,6 +892,11 @@ def test_results_of_excited_states(qcore_application):
     assert results.excitations[0]['spin'] == '–' and results.excitations[0]['strengthText'] == '–'
     assert results.tiles[-1]['detail'] == 'EOM-CCSD · 289 nm'
 
+    # The split partner of a degenerate open-shell ground state: no wavelength, no stick.
+    results.set_results(ResultsLogic(excited_states=ExcitedStates('EOM-CCSD', [Excitation(1, 0.009), Excitation(2, 4.29)])))
+    assert results.tiles[-1] == {'title': 'Lowest excitation (eV)', 'value': '0.009', 'detail': 'EOM-CCSD', 'tone': ''}
+    assert results.excitations[0]['wavelengthText'] == '–' and results.excitations[0]['wavelength'] == 0.0
+
 
 def test_results_offer_only_what_was_found(qcore_application):
     results = Results()
