@@ -627,11 +627,12 @@ def test_method_engine_path_is_remembered(qcore_application, tmp_path):
     method = Method(adapters=[adapter], settings=_settings(tmp_path))
     changes = _emissions(method.engineChanged)
 
-    method.setEnginePath('file:///F:/ORCA/orca.exe')
+    executable = tmp_path / 'ORCA' / 'orca.exe'  # a file URL of this platform, as the file dialog gives
+    method.setEnginePath(QUrl.fromLocalFile(str(executable)).toString())
 
-    assert adapter.executable == 'F:/ORCA/orca.exe'
+    assert Path(adapter.executable) == executable
     assert len(changes) == 1
-    assert Method(adapters=[FakeAdapter()], settings=_settings(tmp_path)).adapter.executable == 'F:/ORCA/orca.exe'
+    assert Path(Method(adapters=[FakeAdapter()], settings=_settings(tmp_path)).adapter.executable) == executable
 
     method.setEnginePath('')
     assert adapter.executable is None

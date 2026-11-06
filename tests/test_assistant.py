@@ -29,9 +29,9 @@ from Backends.Py.logic.calculations import CalculationType
 from Backends.Py.logic.claude_backend import FALLBACK_BETA
 from Backends.Py.logic.claude_backend import MAX_REQUESTS
 from Backends.Py.logic.claude_backend import SYSTEM_MESSAGES_BETA
+from Backends.Py.logic.claude_backend import describe_error
 from Backends.Py.logic.results import Excitation
 from Backends.Py.logic.results import ExcitedStates
-from Backends.Py.logic.claude_backend import describe_error
 from Backends.Py.logic.results import Results as ResultsLogic
 from Backends.Py.logic.sample import STRUCTURES_DIR
 from Backends.Py.method import Method
@@ -296,8 +296,10 @@ def test_structures_load_only_from_allowed_places(parts, tmp_path):
 
     secret = tmp_path / 'private.xyz'
     secret.write_text('1\n\nXx 0 0 0\n', encoding='utf-8')
-    outside = os.path.relpath(secret, STRUCTURES_DIR)  # ../../…/private.xyz: out of the examples folder
-    for name in (str(secret), outside, '../../pyproject.toml', 'private.xyz'):
+    names = [str(secret), '../../pyproject.toml', 'private.xyz']
+    if secret.drive == STRUCTURES_DIR.drive:  # Windows has no relative path from one drive to another
+        names.append(os.path.relpath(secret, STRUCTURES_DIR))  # ../../…/private.xyz: out of the examples
+    for name in names:
         assert workspace.prepare('load_structure', {'name': name}).status == 'failed', name
 
     sample.loadStructure(str(secret))  # picked in the file dialog: now allowed, and its error is redacted

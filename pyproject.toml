@@ -50,18 +50,6 @@ llm = [
 'Source Code' = 'https://github.com/easyscience/easyqm'
 'Issue Tracker' = 'https://github.com/easyscience/easyqm/issues'
 
-#############################
-# Package index configuration
-#############################
-
-# EasyApplication is published on the EasyScience package index, not PyPI.
-[[tool.uv.index]]
-name = 'easyscience'
-url = 'https://easyscience.github.io/pypi'
-
-[tool.uv.sources]
-EasyApplication = { index = 'easyscience' }
-
 ############################
 # Build system configuration
 ############################
@@ -148,6 +136,7 @@ testpaths = ['tests']
 
 [tool.ruff]
 exclude = ['tmp']
+src = ['src/EasyQM', 'tests'] # The app and the tests import from here (Backends, fakes)
 indent-width = 4
 line-length = 99 # See also `max-line-length` in [tool.ruff.lint.pycodestyle]
 preview = true   # Enable new rules that are not yet stable, like DOC
@@ -183,6 +172,9 @@ ignore = [
 '*/__init__.py' = [
   'F401', # re-exports are intentional in __init__.py
 ]
+# Launching the engines is these modules' job; commands come from the adapters, not the user.
+'src/EasyQM/Backends/Py/logic/engines/base.py' = ['S404', 'S603']
+'src/EasyQM/Backends/Py/logic/runner.py' = ['S404', 'S603', 'S607']
 'tests/**' = [
   'ANN',    # https://docs.astral.sh/ruff/rules/#flake8-annotations-ann
   'D',      # https://docs.astral.sh/ruff/rules/#pydocstyle-d
