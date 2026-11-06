@@ -50,8 +50,12 @@ Rectangle {
     }
 
     // Model text is shown as Markdown without images, so the view loads no local or remote resource.
+    // Model text as Markdown that loads nothing: outside code, '<' would start raw HTML and '!['
+    // an image (inline or by reference), and either can fetch a remote URL. Code shows as written.
     function markdown(text) {
-        return text.replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        return text.split(/(```[\s\S]*?```|`[^`\n]*`)/)
+            .map((part, i) => i % 2 ? part : part.replace(/</g, '&lt;').replace(/!\[/g, '!\\['))
+            .join('')
     }
 
     width: Math.round(EaStyle.Sizes.sideBarWidth * 0.85)
@@ -297,6 +301,7 @@ Rectangle {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 font.bold: true
+                textFormat: Text.PlainText
                 text: panel.approval.title ?? ''
             }
             Repeater {
@@ -305,6 +310,7 @@ Rectangle {
                     width: cardColumn.width
                     wrapMode: Text.WrapAnywhere
                     color: EaStyle.Colors.themeForegroundMinor
+                    textFormat: Text.PlainText
                     text: modelData
                 }
             }
@@ -434,6 +440,7 @@ Rectangle {
             Text {
                 id: measure
                 visible: false
+                textFormat: Text.PlainText
                 text: bubbleItem.entry.text
                 font.family: EaStyle.Fonts.fontFamily
                 font.pixelSize: EaStyle.Sizes.fontPixelSize
@@ -502,6 +509,7 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 font.pixelSize: EaStyle.Sizes.fontPixelSize * 0.9
                 color: EaStyle.Colors.themeForegroundMinor
+                textFormat: Text.PlainText
                 text: actionItem.entry.text
             }
             EaElements.Label {
@@ -537,6 +545,7 @@ Rectangle {
             font.pixelSize: EaStyle.Sizes.fontPixelSize * 0.9
             font.italic: noticeItem.entry.role === 'notice'
             color: noticeItem.entry.role === 'error' ? EaStyle.Colors.red : EaStyle.Colors.themeForegroundMinor
+            textFormat: Text.PlainText
             text: noticeItem.entry.text
         }
     }

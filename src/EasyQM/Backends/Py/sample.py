@@ -584,12 +584,13 @@ class Sample(QObject):
 
     @Slot(int)
     def setCharge(self, charge: int) -> None:
-        """A multiplicity the new electron count does not allow goes to the lowest it allows."""
-        try:
+        """A multiplicity the new electron count does not allow goes to the lowest it allows. A
+        refused charge changes nothing: the field binds to the old one again."""
+        before = (self._logic.charge, self._logic.multiplicity)
+        with contextlib.suppress(ValueError):
             self._logic.set_charge(int(charge))
-        except ValueError:
-            pass  # the field shows the old charge again
-        self.electronicStateChanged.emit()
+        if (self._logic.charge, self._logic.multiplicity) != before:
+            self.electronicStateChanged.emit()
 
     @Slot(int)
     def setMultiplicity(self, multiplicity: int) -> None:
