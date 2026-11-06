@@ -4,7 +4,6 @@ import sys
 
 import gemmi
 import pytest
-from conftest import NACL_CIF
 
 from Backends.Py.logic.elements import COVALENT_RADII
 from Backends.Py.logic.elements import SYMBOLS
@@ -14,6 +13,7 @@ from Backends.Py.logic.sample import Sample
 from Backends.Py.logic.sample import find_bonds
 from Backends.Py.logic.sample import read_cif
 from Backends.Py.logic.sample import read_xyz
+from conftest import NACL_CIF
 
 
 def test_benzene_is_bundled():

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 EasyQM contributors
 # SPDX-License-Identifier: BSD-3-Clause
 import pytest
+
 from Backends.Py.logic.geometry import angle
 from Backends.Py.logic.geometry import dihedral
 from Backends.Py.logic.geometry import distance
