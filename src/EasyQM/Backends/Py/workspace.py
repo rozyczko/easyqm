@@ -26,6 +26,7 @@ from .logic.calculations import info
 from .logic.elements import SYMBOLS
 from .logic.engines.orca import excited_states_problem
 from .logic.method import describe
+from .logic.method import reference_problem
 from .logic.sample import STRUCTURES_DIR
 from .logic.zmatrix import FIELDS as ZMATRIX_FIELDS
 from .sample import REPEAT_MAX
@@ -298,7 +299,10 @@ class Workspace:
         self.send_output = True  # engine output and its messages may go to the model
         self.send_results = True
         # One counter per part, raised on every change: approvals and atom indices refer to them.
-        self.revisions = dict.fromkeys(('project', 'sample', 'calculations', 'method'), 0)
+        # 'job' counts the starts and ends of jobs.
+        self.revisions = dict.fromkeys(('project', 'sample', 'calculations', 'method', 'job'), 0)
+        self._job_running = job.running
+        job.stateChanged.connect(self._job_state_changed)
         self._loaded_revision = 0  # the sample's revision right after its last load
         changes = {
             'project': (project.createdChanged, project.locationChanged),
@@ -316,6 +320,11 @@ class Workspace:
 
     def _changed(self, part: str) -> None:
         self.revisions[part] += 1
+
+    def _job_state_changed(self) -> None:
+        if self._job.running != self._job_running:
+            self._job_running = self._job.running
+            self._changed('job')
 
     def _structure_loaded(self) -> None:
         self._loaded_revision = self.revisions['sample']
@@ -382,9 +391,9 @@ class Workspace:
             'run_folder': _home(record['folder']) if record else '',
         }
         if self.send_output:
-            data['job_message'] = job.message
+            data['job_message'] = _home_text(job.message)
             lines = job.tail(OUTPUT_TAIL_CHARS * 2).splitlines()[-OUTPUT_TAIL_LINES:]
-            data['output_tail'] = '\n'.join(line[:LINE_CHARS] for line in lines)[-OUTPUT_TAIL_CHARS:]
+            data['output_tail'] = _home_text('\n'.join(line[:LINE_CHARS] for line in lines)[-OUTPUT_TAIL_CHARS:])
         return facts, {key: value for key, value in data.items() if value}
 
     def _view_facts(self) -> dict:
@@ -505,7 +514,7 @@ class Workspace:
             return Outcome('failed', 'lines must be from 1 to 200.')
         text = self._job.output if contains else self._job.tail(TOOL_OUTPUT_CHARS * 4)
         chosen = [line[:LINE_CHARS] for line in text.splitlines() if contains in line][-lines:]
-        return Outcome('ok', '\n'.join(chosen)[-TOOL_OUTPUT_CHARS:] or '(no matching output)')
+        return Outcome('ok', _home_text('\n'.join(chosen)[-TOOL_OUTPUT_CHARS:]) or '(no matching output)')
 
     def _tool_show_page(self, page: str) -> Outcome:
         if page not in PAGES:
@@ -567,8 +576,8 @@ class Workspace:
             allowed = logic.multiplicities(charge)
             multiplicity = logic.multiplicity if logic.multiplicity in allowed or not allowed else allowed[0]
         problem = logic.electronic_state_problem(charge, multiplicity)
-        if not problem and multiplicity > 1 and self._method.reference == 'RKS':
-            problem = f'Multiplicity {multiplicity} needs an open-shell reference: set_method reference first.'
+        if not problem and (problem := reference_problem(self._method.reference, multiplicity)):
+            problem += ' Change it with set_method first.'
         if problem:
             return Outcome('failed', problem)
         before = (sample.charge, sample.multiplicity)
@@ -846,8 +855,7 @@ class Workspace:
         family = values.get('family', method.family)
         problems = [by_name[name].problem(method, value) or self._method_problem(by_name[name], family)
                     for name, value in values.items()]
-        if values.get('reference') == 'RKS' and self._sample.multiplicity > 1:
-            problems.append(f'Multiplicity {self._sample.multiplicity} needs an open-shell reference, not RKS.')
+        problems.append(reference_problem(values.get('reference', ''), self._sample.multiplicity))
         if 'kpoint_spacing' in values and 'kpoint_grid' in values:
             problems.append('Give kpoint_spacing or kpoint_grid, not both.')
         changes = [(f, values[f.name]) for f in METHOD_FIELDS if f.name in values]  # family first
@@ -881,7 +889,7 @@ class Workspace:
         problem = ('' if method.engineFound else f'{method.engineName} was not found on this machine.') \
             or method.cannotRunReason or job.preflight()
         if problem:
-            return Outcome('failed', problem)
+            return Outcome('failed', _home_text(problem))
         destination = 'project folder' if self._project.created else 'scratch folder, no project is open'
         detail = [
             f'{method.engineName} {method.engineVersion}'.strip(),
@@ -894,7 +902,8 @@ class Workspace:
         def run() -> Outcome:
             job.run()
             if not job.running:
-                return Outcome('failed', f'The job did not start: {job.message}')
+                why = _home_text(job.message) if self.send_output else 'its message is not shared (engine output is off)'
+                return Outcome('failed', f'The job did not start: {why}')
             record = job.record
             return Outcome('changed', f'Started run {record["run_id"]} in {_home(record["folder"])}; it is running.')
 
@@ -972,6 +981,14 @@ def _home(path) -> str:
     # Resolved, so that Windows short names (C:\Users\ABCDEF~1) are recognised too.
     text, home = str(Path(path).resolve()), str(Path.home().resolve())
     return '~' + text[len(home):] if text.lower().startswith(home.lower()) else text
+
+
+def _home_text(text: str) -> str:
+    """Text with every mention of the home folder as '~', as `_home` does for one path."""
+    for home in {str(Path.home()), str(Path.home().resolve())}:
+        for form in {home, home.replace('\\', '/')}:
+            text = re.sub(re.escape(form), '~', text, flags=re.IGNORECASE)
+    return text
 
 
 def _redact(error: str) -> str:

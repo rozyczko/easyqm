@@ -223,12 +223,26 @@ def test_excited_states_run_last_in_their_own_process_on_the_optimised_geometry(
 
 
 def test_excited_states_alone_or_after_a_single_point():
+    # Alone, after a plain single point that gives the ground-state values.
     alone = _files(EXCITED)
-    assert list(alone) == ['job.inp'] and '%tddft' in alone['job.inp'] and '* xyz 0 1' in alone['job.inp']
+    assert list(alone) == ['job.inp', 'excited.inp']
+    assert alone['job.inp'].splitlines()[0] == '# EasyQM: benzene (C6H6) - Single point energy'
+    assert alone['job.inp'].splitlines()[1] == '! B3LYP D3BJ RKS def2-TZVP def2/J RIJCOSX TightSCF DefGrid2'
+    assert '%tddft' not in alone['job.inp'] and '* xyz 0 1' in alone['excited.inp']
 
     files = _files(CalculationType.SINGLE_POINT, EXCITED)
     assert files['job.inp'].splitlines()[1].endswith('PrintMOs') and '%tddft' not in files['job.inp']
     assert '* xyz 0 1' in files['excited.inp']  # no optimisation: the input geometry
+
+
+def test_excited_states_after_an_input_geometry_single_point_read_the_second_job_geometry():
+    def input_geometry(sample, calculations):
+        calculations.single_point.geometry = 'input'
+
+    files = _files(CalculationType.SINGLE_POINT, CalculationType.GEOMETRY_OPTIMISATION, EXCITED,
+                   configure=input_geometry)
+    assert '$new_job' in files['job.inp']
+    assert files['excited.inp'].splitlines()[-1] == '* xyzfile 0 1 job_job2.xyz'
 
 
 def test_tddft_options_and_orbital_window():

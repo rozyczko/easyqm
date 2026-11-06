@@ -1,8 +1,10 @@
-# Lint, build and test EasyQM on every push and pull request.
+# Lint, build and test EasyQM on every pull request and every push to main.
 name: CI
 
 on:
+  # Pushes to main only: a pushed PR branch already runs through pull_request.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

@@ -8,12 +8,12 @@ optimised geometry), and the single point is the energy every job prints. Only a
 point at the *input* geometry before an optimisation needs a second job, joined with
 ``$new_job``.
 
-Excited states run last, in a second ORCA process on ``excited.inp`` when there are
-ground-state steps, on the optimised geometry (``job.xyz``) after an optimisation. A job
-after ``$new_job`` would inherit settings such as the dispersion correction, which ORCA
-refuses with EOM-CCSD; and on its own ORCA neither optimises nor differentiates an excited
-state. The energies before stay ground-state ones; the excited-state job reports the
-excited state's energy as its final energy.
+Excited states run last, in a second ORCA process on ``excited.inp``, on the optimised
+geometry after an optimisation. A job after ``$new_job`` would inherit settings such as the
+dispersion correction, which ORCA refuses with EOM-CCSD; and on its own ORCA neither
+optimises nor differentiates an excited state. The excited-state job reports the excited
+state's energy as its final energy, so the ground-state values come from ``job.inp``: a
+single point when no ground-state calculation is ticked.
 """
 
 import re
@@ -142,7 +142,6 @@ class OrcaAdapter(EngineAdapter):
             jobs.append(_job(sample, method, settings, ['PrintMOs'] if print_orbitals else [], []))
 
         keywords, blocks = [], []
-        ground_state = single_point or optimisation or frequencies
         if print_orbitals and not separate_single_point:
             keywords.append('PrintMOs')
         if optimisation:
@@ -158,17 +157,18 @@ class OrcaAdapter(EngineAdapter):
             blocks.append(f'%freq\n  Temp {options.temperature:g}\n  Pressure {options.pressure:g}\nend')
             if options.raman:
                 blocks.append('%elprop\n  Polar 1\nend')
-        if ground_state:
-            jobs.append(_job(sample, method, settings, keywords, blocks))
+        jobs.append(_job(sample, method, settings, keywords, blocks))  # with excited states alone, a single point
 
         title = f'# EasyQM: {sample.name or "sample"} ({sample.formula}) - '
-        ground = ', '.join(info(step).name for step in steps if step is not CalculationType.EXCITED_STATES)
-        files = {self.input_file_name: title + ground + '\n' + '\n$new_job\n'.join(jobs)} if jobs else {}
+        ground = [info(step).name for step in steps if step is not CalculationType.EXCITED_STATES]
+        ground_text = ', '.join(ground or [info(CalculationType.SINGLE_POINT).name])
+        files = {self.input_file_name: title + ground_text + '\n' + '\n$new_job\n'.join(jobs)}
         if excited:
-            geometry = Path(self.input_file_name).with_suffix('.xyz').name if optimisation else ''
+            # ORCA names the files of the job after `$new_job` <stem>_job2.
+            stem = Path(self.input_file_name).stem + ('_job2' if separate_single_point else '')
+            geometry = f'{stem}.xyz' if optimisation else ''
             text = _excited_job(sample, method, settings, calculations.excited_states, geometry)
-            name = EXCITED_FILE_NAME if files else self.input_file_name
-            files[name] = title + info(CalculationType.EXCITED_STATES).name + '\n' + text
+            files[EXCITED_FILE_NAME] = title + info(CalculationType.EXCITED_STATES).name + '\n' + text
         return files
 
     def commands(self, executable: str, input_names: list[str]) -> list[list[str]]:

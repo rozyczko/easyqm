@@ -7,7 +7,8 @@ The controller owns the conversation sent to the model (`_history`), the items t
 (`logic.claude_backend.Turn`); its tool calls come back here, to the main thread, where the
 workspace checks them and runs them, after the user's approval when their effect needs one.
 Every worker event carries the turn id, so events of a cancelled or cleared turn change nothing.
-Without a configured model the offline stub answers.
+Without a configured model the offline stub answers. The first question of a session waits until
+the user agrees to what is shared with the model.
 """
 
 import json
@@ -46,6 +47,7 @@ class _Bridge(QObject):
 
     text = Signal(int, str)
     tool = Signal(int, object)  # (call id, tool name, input, Future)
+    snapshot = Signal(int, object)  # (Future,) for the current snapshot text
     done = Signal(int, object)  # (generation, TurnResult)
 
 
@@ -93,6 +95,7 @@ class Assistant(QObject):
         self._bridge = _Bridge(self)
         self._bridge.text.connect(self._on_text)
         self._bridge.tool.connect(self._on_tool)
+        self._bridge.snapshot.connect(self._on_snapshot)
         self._bridge.done.connect(self._on_done)
         application = QCoreApplication.instance()
         if application is not None:
@@ -141,12 +144,11 @@ class Assistant(QObject):
 
     @Property('QVariantMap', notify=approvalChanged)
     def approval(self) -> dict:
-        """{id, title, detail, confirm} of the action waiting for the user; {} when none waits."""
+        """{id, title, detail, confirm} of what waits for the user: an action, or sharing the
+        first question; {} when nothing waits."""
         if self._approval is None:
             return {}
-        action = self._approval['action']
-        return {'id': self._approval['id'], 'title': action.title, 'detail': action.detail,
-                'confirm': _CONFIRM.get(action.effect, 'Allow')}
+        return {'id': self._approval['id'], **self._approval['card']}
 
     @Property(str, notify=usageChanged)
     def usageText(self) -> str:
@@ -178,7 +180,7 @@ class Assistant(QObject):
     @Slot(str)
     def send(self, text: str) -> None:
         question = text.strip()
-        if not question or self.busy:
+        if not question or self.busy or self._approval is not None:
             return
         self._declined.clear()
         self._add('user', question)
@@ -191,21 +193,29 @@ class Assistant(QObject):
         if sum(self._usage.values()) >= SESSION_TOKEN_LIMIT:
             self._add('notice', 'This session reached its token limit. Restart EasyQM to continue with the model.')
             return
+        if not self._disclosed:
+            # Nothing leaves the machine before the user agreed to what is shared.
+            self._approval = {'id': 'disclosure', 'question': question,
+                              'card': {'title': f'Share this with Anthropic ({self._settings.model})?',
+                                       'detail': [self._disclosure()], 'confirm': 'Send'}}
+            self.approvalChanged.emit()
+            return
+        self._start_turn(question)
+
+    def _start_turn(self, question: str) -> None:
         try:
             client = self._settings.client()
         except Exception as error:
             self._add('error', f'The assistant could not start: {error}')
             return
-        if not self._disclosed:
-            self._disclosed = True
-            self._add('notice', self._disclosure())
         facts, data = self._workspace.snapshot()
         self._turn_id += 1
         turn_id, generation = self._turn_id, self._generation
         turn = Turn(client, self._settings.model, self._settings.effort, TOOLS, self._history,
                     [{'type': 'text', 'text': question}, {'type': 'text', 'text': data_text(data)}], facts_text(facts),
                     dispatch=lambda call_id, name, args: self._dispatch(turn, turn_id, call_id, name, args),
-                    on_text=lambda text: self._bridge.text.emit(turn_id, text))
+                    on_text=lambda text: self._bridge.text.emit(turn_id, text),
+                    refresh=lambda: self._ask(turn, self._bridge.snapshot, turn_id, ()))
         self._turn = turn
         self._thread = threading.Thread(target=lambda: self._bridge.done.emit(turn_id, (generation, turn.run())),
                                         name='assistant-turn', daemon=True)
@@ -231,7 +241,15 @@ class Assistant(QObject):
     def answerApproval(self, approval_id: str, allowed: bool) -> None:
         if self._approval is None or self._approval['id'] != approval_id:
             return  # an answer to a card that is gone
-        if allowed:
+        if 'question' in self._approval:
+            question = self._take_approval()['question']
+            if allowed:
+                self._disclosed = True
+                self._add('notice', self._disclosure())
+                self._start_turn(question)
+            else:
+                self._add('notice', 'Nothing was sent.')
+        elif allowed:
             approval = self._take_approval()
             self._execute(approval['action'], approval['future'])
         else:
@@ -241,6 +259,7 @@ class Assistant(QObject):
     def clear(self) -> None:
         """Forget the conversation; a turn in progress is cancelled and its answer dropped."""
         self.cancel()
+        self._take_approval()  # a first question still waiting to be shared
         self._generation += 1
         self._items, self._history = [], []
         self._streaming = ''
@@ -261,12 +280,19 @@ class Assistant(QObject):
 
     def _dispatch(self, turn: Turn, turn_id: int, call_id: str, name: str, args: dict) -> tuple[str, str, bool]:
         """A tool call, run on the main thread; waits for it, or for the turn's cancellation."""
+        outcome = self._ask(turn, self._bridge.tool, turn_id, (call_id, name, args))
+        outcome = outcome or Outcome('cancelled', 'Cancelled by the user.')
+        return outcome.status, outcome.text, outcome.is_error
+
+    @staticmethod
+    def _ask(turn: Turn, signal, turn_id: int, call: tuple):
+        """What the main thread answers to `signal` with this call and a Future; None when the
+        turn is cancelled first."""
         future = Future()
-        self._bridge.tool.emit(turn_id, (call_id, name, args, future))
+        signal.emit(turn_id, (*call, future))
         while not future.done() and not turn.cancelled.wait(0.05):
             pass
-        outcome = future.result() if future.done() else Outcome('cancelled', 'Cancelled by the user.')
-        return outcome.status, outcome.text, outcome.is_error
+        return future.result() if future.done() else None
 
     # Main thread: worker events
 
@@ -278,8 +304,22 @@ class Assistant(QObject):
             self._streaming += text
             self.streamingTextChanged.emit()
 
+    def _on_snapshot(self, turn_id: int, call: tuple) -> None:
+        (future,) = call
+        try:
+            future.set_result(facts_text(self._workspace.snapshot()[0]) if self._alive(turn_id) else None)
+        except Exception as error:  # the turn then ends with this error
+            future.set_exception(error)
+
     def _on_tool(self, turn_id: int, call: tuple) -> None:
-        call_id, name, args, future = call
+        future = call[-1]
+        try:
+            self._handle_tool(turn_id, *call)
+        except Exception as error:  # the worker waits for an answer: no error may leave it waiting
+            if not future.done():
+                future.set_result(Outcome('failed', f'{call[1]} failed: {error}'))
+
+    def _handle_tool(self, turn_id: int, call_id: str, name: str, args: dict, future: Future) -> None:
         if not self._alive(turn_id):
             future.set_result(Outcome('cancelled', 'Cancelled by the user.'))
             return
@@ -294,7 +334,9 @@ class Assistant(QObject):
                 self._add('action', prepared.text, ok=False)
             future.set_result(prepared)
         elif self._workspace.approval_needed(prepared, self._settings.approvalMode):
-            self._approval = {'id': f'{turn_id}:{call_id}', 'action': prepared, 'future': future, 'key': key}
+            card = {'title': prepared.title, 'detail': prepared.detail, 'confirm': _CONFIRM.get(prepared.effect, 'Allow')}
+            self._approval = {'id': f'{turn_id}:{call_id}', 'action': prepared, 'future': future, 'key': key,
+                              'card': card}
             self._approval_timer.start()
             self._set_status('Waiting for your confirmation')
             self.approvalChanged.emit()
@@ -327,7 +369,7 @@ class Assistant(QObject):
         approval, self._approval = self._approval, None
         self._approval_timer.stop()
         if approval is not None:
-            self._set_status('Thinking')
+            self._set_status('Thinking' if self._turn is not None else '')
             self.approvalChanged.emit()
         return approval
 
@@ -346,6 +388,8 @@ class Assistant(QObject):
             self.modelChanged.emit()
         if generation == self._generation:
             self._history += result.messages
+            if result.refused:
+                self._streaming = ''  # text written before a refusal is dropped
             self._flush_streaming()
             if result.error:
                 self._add('error', result.error)

@@ -27,6 +27,7 @@ from .logic.calculations import CalculationType
 from .logic.calculations import info
 from .logic.engines.base import EngineAdapter
 from .logic.method import describe
+from .logic.method import reference_problem
 from .logic.runner import JobRunner
 from .logic.runner import JobState
 from .logic.runner import new_run_folder
@@ -228,6 +229,11 @@ class Job(QObject):
         return ''
 
     def _prepare(self) -> tuple[dict, list]:
+        sample = self._sample
+        problem = (sample.electronic_state_problem(sample.charge, sample.multiplicity)
+                   or reference_problem(self._method.reference, sample.multiplicity))
+        if problem:
+            raise ValueError(f'{problem} Change it on the Sample or Method page.')
         if not self._executable:
             raise RuntimeError(f'{self._adapter.name} was not found. Configure its path first.')
         files = self._adapter.input_files(self._sample, self._calculations, self._method, self._settings)

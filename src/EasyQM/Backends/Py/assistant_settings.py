@@ -12,6 +12,7 @@ QML property and never logged.
 
 import contextlib
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Callable
@@ -37,8 +38,24 @@ APPROVAL_MODES = (
     ('every', 'Ask before every change'),
     ('never', 'Never ask'),
 )
-CLI_PROFILE_DIR = Path.home() / '.config' / 'anthropic'
 _GROUP = 'assistant'
+
+
+def cli_profile_file() -> Path:
+    """The CLI profile the SDK would read, found as anthropic 1.17 finds it without importing it:
+    `<config folder>/configs/<profile>.json`, the profile named by ANTHROPIC_PROFILE, the folder's
+    `active_config` file or 'default'."""
+    if os.environ.get('ANTHROPIC_CONFIG_DIR'):
+        folder = Path(os.environ['ANTHROPIC_CONFIG_DIR'])
+    elif sys.platform == 'win32':
+        folder = Path(os.environ.get('APPDATA') or Path.home() / 'AppData' / 'Roaming') / 'Anthropic'
+    else:
+        folder = Path.home() / '.config' / 'anthropic'
+    name = os.environ.get('ANTHROPIC_PROFILE', '')
+    if not name:
+        with contextlib.suppress(OSError):
+            name = (folder / 'active_config').read_text(encoding='utf-8').strip()
+    return folder / 'configs' / f'{name or "default"}.json'
 
 
 class AssistantSettings(QObject):
@@ -139,7 +156,7 @@ class AssistantSettings(QObject):
             return 'assistant settings'
         if os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('ANTHROPIC_AUTH_TOKEN'):
             return 'environment variable'
-        if CLI_PROFILE_DIR.is_dir():
+        if cli_profile_file().is_file():
             return 'Anthropic CLI profile'
         return ''
 
@@ -150,7 +167,16 @@ class AssistantSettings(QObject):
 
     @Property(bool, notify=changed)
     def secureStoreAvailable(self) -> bool:
-        return self._probe()
+        """Whether the credential store works; False until `checkSecureStore` or a remembered key
+        tried it, so that starting the application writes nothing to it."""
+        return bool(self._secure)
+
+    @Slot()
+    def checkSecureStore(self) -> None:
+        """Try the credential store, once: when the settings dialog opens."""
+        if self._secure is None:
+            self._probe()
+            self.changed.emit()
 
     @Property(bool, notify=changed)
     def sdkAvailable(self) -> bool:
