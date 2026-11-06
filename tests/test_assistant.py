@@ -254,8 +254,10 @@ def test_structures_load_only_from_allowed_places(parts, tmp_path):
 
     secret = tmp_path / 'private.xyz'
     secret.write_text('1\n\nXx 0 0 0\n', encoding='utf-8')
-    outside = os.path.relpath(secret, STRUCTURES_DIR)  # ../../…/private.xyz: out of the examples folder
-    for name in (str(secret), outside, '../../pyproject.toml', 'private.xyz'):
+    names = [str(secret), '../../pyproject.toml', 'private.xyz']
+    if secret.drive == STRUCTURES_DIR.drive:  # Windows has no relative path from one drive to another
+        names.append(os.path.relpath(secret, STRUCTURES_DIR))  # ../../…/private.xyz: out of the examples
+    for name in names:
         assert workspace.prepare('load_structure', {'name': name}).status == 'failed', name
 
     sample.loadStructure(str(secret))  # picked in the file dialog: now allowed, and its error is redacted
