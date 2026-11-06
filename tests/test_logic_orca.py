@@ -116,14 +116,19 @@ def test_orca_refuses_a_crystal(nacl_cif):
 # Input generation
 
 
-def _input(*steps, method=None, configure=None) -> str:
+def _files(*steps, method=None, configure=None) -> dict[str, str]:
     sample = Sample.benzene()
     calculations = Calculations()
     for step in steps:
         calculations.set_selected(step, True)
     if configure is not None:
         configure(sample, calculations)
-    return OrcaAdapter().input_text(sample, calculations, method or Method(), RunSettings(memory_gb=4))
+    return OrcaAdapter().input_files(sample, calculations, method or Method(), RunSettings(memory_gb=4))
+
+
+def _input(*steps, method=None, configure=None) -> str:
+    """The text of the last input file: the only one but with excited states after other steps."""
+    return list(_files(*steps, method=method, configure=configure).values())[-1]
 
 
 def test_single_point_input():
@@ -190,6 +195,99 @@ def test_hartree_fock_and_other_method_keywords():
 
     assert text.splitlines()[1] == '! HF UHF def2-TZVP NoRI CPCM(water) VeryTightSCF DefGrid3 PrintMOs'
     assert '  STABPerform true' in text
+
+
+EXCITED = CalculationType.EXCITED_STATES
+
+
+def _excited(**options):
+    def configure(sample, calculations):
+        for name, value in options.items():
+            setattr(calculations.excited_states, name, value)
+
+    return configure
+
+
+def test_excited_states_run_last_in_their_own_process_on_the_optimised_geometry():
+    files = _files(CalculationType.GEOMETRY_OPTIMISATION, EXCITED)
+    first, second = files['job.inp'], files['excited.inp']
+
+    assert first.splitlines()[0] == '# EasyQM: benzene (C6H6) - Geometry optimisation'
+    assert first.splitlines()[1].endswith('DefGrid2 TightOpt') and '%tddft' not in first
+    assert second.splitlines()[0] == '# EasyQM: benzene (C6H6) - Excited states'
+    assert second.splitlines()[1] == '! B3LYP D3BJ RKS def2-TZVP def2/J RIJCOSX TightSCF DefGrid2'
+    assert '%tddft\n  NRoots 5\n  TDA true\nend' in second
+    assert second.splitlines()[-1] == '* xyzfile 0 1 job.xyz'
+    # A job after $new_job would inherit settings (D3BJ, which EOM-CCSD refuses).
+    assert OrcaAdapter().commands('orca', list(files)) == [['orca', 'job.inp'], ['orca', 'excited.inp']]
+
+
+def test_excited_states_alone_or_after_a_single_point():
+    # Alone, after a plain single point that gives the ground-state values.
+    alone = _files(EXCITED)
+    assert list(alone) == ['job.inp', 'excited.inp']
+    assert alone['job.inp'].splitlines()[0] == '# EasyQM: benzene (C6H6) - Single point energy'
+    assert alone['job.inp'].splitlines()[1] == '! B3LYP D3BJ RKS def2-TZVP def2/J RIJCOSX TightSCF DefGrid2'
+    assert '%tddft' not in alone['job.inp'] and '* xyz 0 1' in alone['excited.inp']
+
+    files = _files(CalculationType.SINGLE_POINT, EXCITED)
+    assert files['job.inp'].splitlines()[1].endswith('PrintMOs') and '%tddft' not in files['job.inp']
+    assert '* xyz 0 1' in files['excited.inp']  # no optimisation: the input geometry
+
+
+def test_excited_states_after_an_input_geometry_single_point_read_the_second_job_geometry():
+    def input_geometry(sample, calculations):
+        calculations.single_point.geometry = 'input'
+
+    files = _files(CalculationType.SINGLE_POINT, CalculationType.GEOMETRY_OPTIMISATION, EXCITED,
+                   configure=input_geometry)
+    assert '$new_job' in files['job.inp']
+    assert files['excited.inp'].splitlines()[-1] == '* xyzfile 0 1 job_job2.xyz'
+
+
+def test_tddft_options_and_orbital_window():
+    text = _input(EXCITED, configure=_excited(tda=False, triplets=True, occupied_orbitals=3, virtual_orbitals=10))
+    # Benzene's 42 electrons fill orbitals 0 to 20.
+    assert ('%tddft\n  NRoots 5\n  TDA false\n  Triplets true\n'
+            '  OrbWin[0] = 18,-1,-1,30\n  OrbWin[1] = 18,-1,-1,30\nend') in text
+
+    text = _input(EXCITED, configure=_excited(virtual_orbitals=10))
+    assert '  OrbWin[0] = -1,-1,-1,30' in text  # ORCA keeps its own first occupied orbital
+
+
+def test_eom_ccsd_runs_on_the_hartree_fock_reference():
+    files = _files(CalculationType.SINGLE_POINT, EXCITED, configure=_excited(method='eom_ccsd', states=3))
+    first, second = files['job.inp'], files['excited.inp']
+
+    assert first.splitlines()[1].startswith('! B3LYP D3BJ RKS')
+    assert second.splitlines()[1] == '! HF RHF def2-TZVP NoRI TightSCF DefGrid2 EOM-CCSD FrozenCore'
+    assert '%mdci\n  NRoots 3\nend' in second
+
+    text = _input(EXCITED, configure=_excited(method='eom_ccsd', frozen_core=False))
+    assert text.splitlines()[1].endswith('EOM-CCSD NoFrozenCore')
+
+
+def test_excited_states_the_engine_cannot_compute_are_refused():
+    with pytest.raises(ValueError, match='closed-shell singlet'):
+        _input(EXCITED, method=Method(reference='UKS'), configure=_excited(triplets=True))
+    with pytest.raises(ValueError, match='RHF or UHF'):
+        _input(EXCITED, method=Method(reference='ROKS'), configure=_excited(method='eom_ccsd'))
+
+    def iodobenzene(sample, calculations):
+        sample.atoms[7].element = 'I'
+        calculations.excited_states.occupied_orbitals = 2
+
+    with pytest.raises(ValueError, match='effective core potential'):
+        _input(EXCITED, configure=iodobenzene)
+
+
+def test_current_step_reaches_the_excited_states():
+    steps = [CalculationType.GEOMETRY_OPTIMISATION, EXCITED]
+    adapter = OrcaAdapter()
+    assert adapter.current_step('GEOMETRY OPTIMIZATION CYCLE   1', steps) == 0
+    for header in ('ORCA TD-DFT/TDA CALCULATION', 'ORCA CIS CALCULATION', 'RHF EOM-CCSD CALCULATION'):
+        assert adapter.current_step(f'GEOMETRY OPTIMIZATION CYCLE   1\n  {header}\n', steps) == 1
+    assert adapter.current_step('ORCA STARTUP CALCULATIONS', [EXCITED, EXCITED]) == 0
 
 
 def test_input_needs_a_calculation():

@@ -12,6 +12,7 @@ from PySide6.QtCore import Slot
 from .helpers import apply
 from .helpers import choices
 from .logic.calculations import CATALOGUE
+from .logic.calculations import EXCITED_STATE_METHODS
 from .logic.calculations import FREQUENCY_TYPES
 from .logic.calculations import OPTIMISATION_CONVERGENCES
 from .logic.calculations import OPTIMISATION_TARGETS
@@ -26,6 +27,7 @@ class Calculations(QObject):
     singlePointChanged = Signal()
     optimisationChanged = Signal()
     frequenciesChanged = Signal()
+    excitedStatesChanged = Signal()
     # Order or labels of the workflow steps: on selection and single point geometry changes.
     workflowChanged = Signal()
 
@@ -50,10 +52,22 @@ class Calculations(QObject):
             self.singlePointChanged,
             self.optimisationChanged,
             self.frequenciesChanged,
+            self.excitedStatesChanged,
             self.workflowChanged,
             self.externalSelectionChanged,
         ):
             signal.emit()
+
+    def set_periodic(self, periodic: bool) -> None:
+        """Follow the sample's kind (for PyBackend): rows it does not allow are greyed and unticked."""
+        if periodic == self._logic.periodic:
+            return
+        selected = set(self._logic.selected)
+        self._logic.set_periodic(periodic)
+        self.selectionChanged.emit()  # the rows' enabled state
+        if self._logic.selected != selected:
+            self.workflowChanged.emit()
+            self.externalSelectionChanged.emit()
 
     # Table and workflow
 
@@ -67,6 +81,8 @@ class Calculations(QObject):
                 'results': entry.results,
                 'notes': entry.notes,
                 'selected': self._logic.is_selected(entry.type),
+                'enabled': not self._logic.unavailable(entry.type),
+                'reason': self._logic.unavailable(entry.type),
             }
             for entry in CATALOGUE
         ]
@@ -102,8 +118,10 @@ class Calculations(QObject):
         self.set_selection(selected | {calculation} if value else selected - {calculation})
 
     def set_selection(self, calculations: set) -> None:
-        """Select exactly these `CalculationType`s, with one change notification."""
-        if set(calculations) == self._logic.selected:
+        """Select exactly these `CalculationType`s, with one change notification; those the
+        sample's kind does not allow stay unselected."""
+        calculations = {calculation for calculation in calculations if not self._logic.unavailable(calculation)}
+        if calculations == self._logic.selected:
             return
         self._logic.selected = set(calculations)
         self.selectionChanged.emit()
@@ -211,3 +229,65 @@ class Calculations(QObject):
     @Slot(bool)
     def setFreqRaman(self, value: bool) -> None:
         apply(self._logic.vibrational_frequencies, 'raman', bool(value), self.frequenciesChanged)
+
+    # Excited states
+
+    @Property(str, notify=excitedStatesChanged)
+    def excMethod(self) -> str:
+        return self._logic.excited_states.method
+
+    @Slot(str)
+    def setExcMethod(self, value: str) -> None:
+        apply(self._logic.excited_states, 'method', value, self.excitedStatesChanged)
+
+    @Property('QVariantList', constant=True)
+    def excMethodChoices(self) -> list:
+        return choices(EXCITED_STATE_METHODS)
+
+    @Property(int, notify=excitedStatesChanged)
+    def excStates(self) -> int:
+        return self._logic.excited_states.states
+
+    @Slot(int)
+    def setExcStates(self, value: int) -> None:
+        apply(self._logic.excited_states, 'states', int(value), self.excitedStatesChanged)
+
+    @Property(bool, notify=excitedStatesChanged)
+    def excTda(self) -> bool:
+        return self._logic.excited_states.tda
+
+    @Slot(bool)
+    def setExcTda(self, value: bool) -> None:
+        apply(self._logic.excited_states, 'tda', bool(value), self.excitedStatesChanged)
+
+    @Property(bool, notify=excitedStatesChanged)
+    def excTriplets(self) -> bool:
+        return self._logic.excited_states.triplets
+
+    @Slot(bool)
+    def setExcTriplets(self, value: bool) -> None:
+        apply(self._logic.excited_states, 'triplets', bool(value), self.excitedStatesChanged)
+
+    @Property(int, notify=excitedStatesChanged)
+    def excOccupiedOrbitals(self) -> int:
+        return self._logic.excited_states.occupied_orbitals
+
+    @Slot(int)
+    def setExcOccupiedOrbitals(self, value: int) -> None:
+        apply(self._logic.excited_states, 'occupied_orbitals', int(value), self.excitedStatesChanged)
+
+    @Property(int, notify=excitedStatesChanged)
+    def excVirtualOrbitals(self) -> int:
+        return self._logic.excited_states.virtual_orbitals
+
+    @Slot(int)
+    def setExcVirtualOrbitals(self, value: int) -> None:
+        apply(self._logic.excited_states, 'virtual_orbitals', int(value), self.excitedStatesChanged)
+
+    @Property(bool, notify=excitedStatesChanged)
+    def excFrozenCore(self) -> bool:
+        return self._logic.excited_states.frozen_core
+
+    @Slot(bool)
+    def setExcFrozenCore(self, value: bool) -> None:
+        apply(self._logic.excited_states, 'frozen_core', bool(value), self.excitedStatesChanged)

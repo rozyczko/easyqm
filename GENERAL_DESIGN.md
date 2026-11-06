@@ -126,7 +126,7 @@ Initial set:
 | Single point energy | ✓ | ✓ | all |
 | Geometry optimisation (positions, optionally cell) | ✓ | ✓ | all |
 | Vibrational frequencies / thermochemistry | ✓ | Γ-point | all |
-| Excited states (TD-DFT) | ✓ | – | ORCA, PSI4 |
+| Excited states (TD-DFT, EOM-CCSD) | ✓ | – (Quantum ESPRESSO's TDDFPT is Γ-only and spin-restricted) | ORCA |
 | Electronic properties (charges, multipoles) | ✓ | ✓ | all |
 | NMR shielding | ✓ | ✓ | ORCA, CASTEP |
 | Transition-state search | ✓ | – | ORCA |

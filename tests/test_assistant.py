@@ -29,6 +29,8 @@ from Backends.Py.logic.calculations import CalculationType
 from Backends.Py.logic.claude_backend import FALLBACK_BETA
 from Backends.Py.logic.claude_backend import MAX_REQUESTS
 from Backends.Py.logic.claude_backend import SYSTEM_MESSAGES_BETA
+from Backends.Py.logic.results import Excitation
+from Backends.Py.logic.results import ExcitedStates
 from Backends.Py.logic.claude_backend import describe_error
 from Backends.Py.logic.results import Results as ResultsLogic
 from Backends.Py.logic.sample import STRUCTURES_DIR
@@ -448,6 +450,48 @@ def test_results_say_whether_they_belong_to_the_current_setup(parts, qcore_appli
     assert not facts['matches_current_state'] and facts['stale_reasons'] == ['method changed since the run']
     workspace.send_results = False
     assert workspace.snapshot()[0]['results'] == {'shared': False}
+
+
+def test_the_assistant_sets_up_excited_states(parts):
+    workspace, options = parts.workspace, parts.calculations.logic.excited_states
+    assert _run(workspace, 'select_calculations', {'types': ['excited_states'], 'mode': 'add'}).status == 'changed'
+    state = workspace.snapshot()[0]['calculations']['options']['excited_states']
+    assert state['method_choices'] == ['tddft', 'eom_ccsd'] and state['states'] == 5 and state['tda']
+
+    outcome = _run(workspace, 'set_calculation_options',
+                   {'excited_states': {'method': 'eom_ccsd', 'states': 3, 'frozen_core': False}})
+    assert outcome.status == 'changed' and (options.method, options.states, options.frozen_core) == ('eom_ccsd', 3, False)
+
+    _run(workspace, 'set_method', {'reference': 'UKS'})
+    outcome = _run(workspace, 'set_calculation_options', {'excited_states': {'method': 'tddft', 'triplets': True}})
+    assert outcome.status == 'failed' and 'closed-shell' in outcome.text and options.method == 'eom_ccsd'
+    assert _run(workspace, 'set_calculation_options', {'excited_states': {'states': 0}}).status == 'failed'
+    assert _run(workspace, 'set_calculation_options', {'excited_states': {'method': 'cc3'}}).status == 'failed'
+
+
+def test_excited_states_are_refused_for_a_crystal(parts):
+    workspace = parts.workspace
+    _run(workspace, 'load_structure', {'name': 'Si.cif'})
+    parts.calculations.set_periodic(True)  # as PyBackend relays the sample's kind
+    facts = workspace.snapshot()[0]['calculations']
+    assert 'excited_states' not in facts['available'] and facts['unavailable'] == {'excited_states': 'Molecules only'}
+
+    outcome = _run(workspace, 'select_calculations', {'types': ['single_point', 'excited_states'], 'mode': 'replace'})
+    assert outcome.status == 'failed' and 'Molecules only' in outcome.text and parts.calculations.selectedCount == 0
+    assert _run(workspace, 'select_calculations', {'types': ['excited_states'], 'mode': 'remove'}).status == 'changed'
+
+
+def test_excited_state_results_are_in_the_snapshot(parts, qcore_application):
+    parts.calculations.setSelected('excited_states', True)
+    parts.job.run()
+    _wait(lambda: not parts.job.running, qcore_application)
+    states = [Excitation(1, 7.535, 1, 0.0172), Excitation(2, 9.429, 1, 0.0)]
+    parts.results.set_results(ResultsLogic(excited_states=ExcitedStates('TD-DFT/TDA', states)))
+
+    facts = parts.workspace.snapshot()[0]['results']['excited_states']
+    assert facts['method'] == 'TD-DFT/TDA' and facts['total'] == 2
+    assert facts['items'][0] == {'state': 1, 'spin': 'singlet', 'energy_ev': 7.535, 'wavelength_nm': '164.5',
+                                 'f': '0.0172'}
 
 
 def test_approval_follows_the_effect_and_the_mode(parts):

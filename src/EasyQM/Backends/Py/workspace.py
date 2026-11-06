@@ -21,8 +21,10 @@ from typing import Union
 
 from .job import configuration
 from .logic.calculations import CalculationType
+from .logic.calculations import ExcitedStatesOptions
 from .logic.calculations import info
 from .logic.elements import SYMBOLS
+from .logic.engines.orca import excited_states_problem
 from .logic.method import describe
 from .logic.method import reference_problem
 from .logic.sample import STRUCTURES_DIR
@@ -159,6 +161,15 @@ OPTION_FIELDS = {
         Field('pressure', 'freqPressure', 'setFreqPressure', 'float', limits=(0.001, 1000), unit='atm'),
         Field('raman', 'freqRaman', 'setFreqRaman', 'bool'),
     ),
+    'excited_states': (
+        Field('method', 'excMethod', 'setExcMethod', 'enum', 'excMethodChoices'),
+        Field('states', 'excStates', 'setExcStates', 'int', limits=(1, 50)),
+        Field('tda', 'excTda', 'setExcTda', 'bool'),
+        Field('triplets', 'excTriplets', 'setExcTriplets', 'bool'),
+        Field('occupied_orbitals', 'excOccupiedOrbitals', 'setExcOccupiedOrbitals', 'int', limits=(0, 1000)),
+        Field('virtual_orbitals', 'excVirtualOrbitals', 'setExcVirtualOrbitals', 'int', limits=(0, 1000)),
+        Field('frozen_core', 'excFrozenCore', 'setExcFrozenCore', 'bool'),
+    ),
 }
 
 
@@ -260,8 +271,10 @@ TOOLS = [
           {'types': {'type': 'array', 'items': {'type': 'string', 'enum': [t.value for t in CalculationType]}},
            'mode': {'type': 'string', 'enum': ['replace', 'add', 'remove']}}, ('types', 'mode')),
     _tool('set_calculation_options', 'Change options of the calculations. Only the fields given change, and only if '
-          'all of them are valid.', {group: _object(fields) for group, fields in OPTION_FIELDS.items()},
-          strict=False),
+          'all of them are valid. excited_states: method tddft (TD-DFT; CIS or TD-HF with the HF family) or '
+          'eom_ccsd; tda, triplets and the orbital counts apply to tddft, frozen_core to eom_ccsd. occupied_orbitals '
+          'and virtual_orbitals are the highest occupied and lowest virtual orbitals used, 0 for the engine\'s choice.',
+          {group: _object(fields) for group, fields in OPTION_FIELDS.items()}, strict=False),
     _tool('set_method', 'Change the level of theory, SCF and run settings of the active engine. Only fields shown in '
           'the workspace `method` state apply to it. Only the fields given change, and only if all of them are valid. '
           'Give kpoint_spacing or kpoint_grid, not both.', {f.name: f.schema() for f in METHOD_FIELDS},
@@ -295,7 +308,8 @@ class Workspace:
             'project': (project.createdChanged, project.locationChanged),
             'sample': (sample.sampleChanged, sample.atomsChanged, sample.electronicStateChanged),
             'calculations': (calculations.selectionChanged, calculations.singlePointChanged,
-                             calculations.optimisationChanged, calculations.frequenciesChanged),
+                             calculations.optimisationChanged, calculations.frequenciesChanged,
+                             calculations.excitedStatesChanged),
             'method': (method.engineChanged, method.levelOfTheoryChanged, method.systemChanged, method.scfChanged,
                        method.runSettingsChanged, method.kpointsChanged),
         }
@@ -348,7 +362,9 @@ class Workspace:
             },
             'calculations': {
                 'selected': [step.value for step in self._calculations.logic.workflow()],
-                'available': [t.value for t in CalculationType],
+                'available': [t.value for t in CalculationType if not self._calculations.logic.unavailable(t)],
+                'unavailable': {t.value: reason for t in CalculationType
+                                if (reason := self._calculations.logic.unavailable(t))},
                 'workflow': [step['label'] for step in self._calculations.workflow],
                 'options': {group: _state(self._calculations, fields) for group, fields in OPTION_FIELDS.items()},
             },
@@ -406,7 +422,7 @@ class Workspace:
         current = self._configuration()
         stale = [f'{part} changed since the run'
                  for part, digest in record['configuration'].items() if current[part] != digest]
-        modes = results.modes
+        modes, excitations = results.modes, results.excitations
         return {
             'available': True,
             'run_id': record['run_id'],
@@ -418,6 +434,11 @@ class Workspace:
             'modes': {'items': [{'number': m['number'], 'frequency_cm1': m['frequency'], 'ir': m['irText'],
                                  'raman': m['ramanText']} for m in modes[:MODES_SHOWN]],
                       'total': len(modes)},
+            'excited_states': {'method': results.excitedStatesMethod,
+                               'items': [{'state': e['state'], 'spin': e['spin'], 'energy_ev': e['energy'],
+                                          'wavelength_nm': e['wavelengthText'], 'f': e['strengthText']}
+                                         for e in excitations[:MODES_SHOWN]],
+                               'total': len(excitations)} if excitations else None,
         }
 
     def _configuration(self) -> dict:
@@ -788,6 +809,9 @@ class Workspace:
         if mode not in ('replace', 'add', 'remove') or not all(t in valid for t in types):
             return Outcome('failed', f'types must be among {", ".join(sorted(valid))}; mode replace, add or remove.')
         current, requested = set(self._calculations.logic.selected), {CalculationType(t) for t in types}
+        refused = [f'{info(t).name}: {reason}.' for t in requested if (reason := self._calculations.logic.unavailable(t))]
+        if refused and mode != 'remove':
+            return Outcome('failed', 'Not for this sample. ' + ' '.join(refused))
         selection = {'replace': requested, 'add': current | requested, 'remove': current - requested}[mode]
         names = [info(t).name for t in CalculationType if t in selection]
 
@@ -820,6 +844,8 @@ class Workspace:
                 return 'Quantum ESPRESSO does not compute Raman activities here.'
             if proposed['type'] != 'numerical':
                 return 'Raman activities need type numerical.'
+        if group == 'excited_states':
+            return excited_states_problem(ExcitedStatesOptions(**proposed), self._sample.logic, self._method.logic)
         return ''
 
     def _tool_set_method(self, **values):

@@ -4,7 +4,7 @@ import EasyApplication.Gui.Style as EaStyle
 import EasyApplication.Gui.Elements as EaElements
 
 
-// Single-series stick spectrum (IR, Raman): one vertical line per transition, heights in
+// Single-series stick spectrum (IR, Raman, UV-Vis): one vertical line per transition, heights in
 // percent of the strongest. Hovering a stick shows its tooltip, clicking selects it.
 // points: [{key, x, y, title, detail}], x in axis units, y >= 0 in any unit.
 Item {
@@ -29,7 +29,7 @@ Item {
     readonly property real yMax: Math.max(...points.map(point => point.y), 0)
     readonly property real xStep: {
         const span = xMaxRaw - xMinRaw
-        return span > 2000 ? 500 : span > 800 ? 200 : 100
+        return span > 2000 ? 500 : span > 800 ? 200 : span > 200 ? 100 : 20
     }
     readonly property real xMinRaw: points.length ? Math.min(...points.map(point => point.x)) : 0
     readonly property real xMaxRaw: points.length ? Math.max(...points.map(point => point.x)) : 4000

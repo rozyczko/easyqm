@@ -30,14 +30,14 @@ EaComponents.SideBarColumn {
         Loader { source: 'Groups/SinglePointEnergy.qml' }
     }
 
-    // PoC1 placeholders: no controls behind these yet.
     EaElements.GroupBox {
-        title: qsTr('Excited states (TD-DFT)')
-        icon: 'cog'
+        title: qsTr('Excited states')
+        icon: 'atom'
 
         Loader { source: 'Groups/ExcitedStates.qml' }
     }
 
+    // PoC1 placeholder: no controls behind it yet.
     EaElements.GroupBox {
         title: qsTr('Electronic properties')
         icon: 'cog'

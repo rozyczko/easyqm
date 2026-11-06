@@ -182,6 +182,10 @@ class Sample:
     def _element_counts(self) -> Counter:
         return Counter(atom.element for atom in self.atoms)
 
+    @property
+    def electrons(self) -> int:
+        return self._electrons()
+
     def _electrons(self, charge: Optional[int] = None) -> int:
         return sum(atomic_number(atom.element) for atom in self.atoms) - (self.charge if charge is None else charge)
 

@@ -9,8 +9,8 @@ import Gui.Components as Components
 import Gui.Globals as Globals
 
 
-// Results of the last job: stat tiles, the geometry optimisation card and the vibrational
-// frequencies card. The backend only offers what the output contains, so every part is
+// Results of the last job: stat tiles, the geometry optimisation card, the vibrational
+// frequencies card and the excited states card. The backend only offers what the output contains, so every part is
 // shown when its data exists, whichever calculations are ticked now.
 Rectangle {
     id: page
@@ -31,6 +31,7 @@ Rectangle {
     }
     // Mode number shared by the spectrum and the table; the future mode animation plays it.
     property var selectedMode: null
+    property var selectedExcitation: null  // the `key` of an excitation row
 
     color: EaStyle.Colors.mainContentBackground
 
@@ -82,6 +83,7 @@ Rectangle {
         function onResultsAvailableChanged() {
             page.showAllGeometry = false
             page.selectedMode = null
+            page.selectedExcitation = null
         }
     }
 
@@ -492,6 +494,121 @@ Rectangle {
                             ToolTip.text: qsTr('Planned: plays the selected mode in the Sample viewer')
                         }
                     }
+                }
+            }
+
+            // Excited states card
+
+            Column {
+                visible: Globals.BackendWrapper.resultsHasExcitedStates
+                width: parent.width
+                spacing: EaStyle.Sizes.fontPixelSize
+
+                SectionTitle {
+                    text: qsTr('Excited states (%1)').arg(Globals.BackendWrapper.resultsExcitedStatesMethod)
+                }
+
+                Components.StickSpectrum {
+                    visible: Globals.BackendWrapper.resultsHasOscillatorStrengths
+                    width: parent.width
+                    height: EaStyle.Sizes.fontPixelSize * 22
+                    points: Globals.BackendWrapper.resultsExcitations
+                        .filter(row => row.wavelength > 0)
+                        .map(row => ({
+                            key: row.key,
+                            x: row.wavelength,
+                            y: row.strength,
+                            title: `${row.energyText} eV · ${row.wavelengthText} nm`,
+                            detail: qsTr('State %1 (%2) · f = %3').arg(row.state).arg(row.spin).arg(row.strengthText)
+                        }))
+                    xTitle: qsTr('Wavelength (nm)')
+                    yTitle: qsTr('Oscillator strength (rel. %)')
+                    selectedKey: page.selectedExcitation
+                    onPicked: (key) => page.selectedExcitation = key
+                }
+
+                WideTable {
+                    id: excitationsTable
+
+                    readonly property var rows: Globals.BackendWrapper.resultsExcitations
+
+                    width: parent.width
+                    model: rows.length
+                    maxRowCountShow: Math.min(Math.max(count, 1), 12)
+
+                    header: EaComponents.TableViewHeader {
+                        EaComponents.TableViewLabel {
+                            width: EaStyle.Sizes.fontPixelSize * 4
+                            horizontalAlignment: Text.AlignHCenter
+                            text: qsTr('State')
+                        }
+                        EaComponents.TableViewLabel {
+                            flexibleWidth: true
+                            horizontalAlignment: Text.AlignLeft
+                            text: qsTr('Spin')
+                        }
+                        EaComponents.TableViewLabel {
+                            width: EaStyle.Sizes.fontPixelSize * 8
+                            horizontalAlignment: Text.AlignRight
+                            text: qsTr('E (eV)')
+                        }
+                        EaComponents.TableViewLabel {
+                            width: EaStyle.Sizes.fontPixelSize * 8
+                            horizontalAlignment: Text.AlignRight
+                            text: qsTr('λ (nm)')
+                        }
+                        EaComponents.TableViewLabel {
+                            width: EaStyle.Sizes.fontPixelSize * 8
+                            horizontalAlignment: Text.AlignRight
+                            text: qsTr('f')
+                        }
+                    }
+
+                    delegate: EaComponents.TableViewDelegate {
+                        readonly property var row: excitationsTable.rows[index]
+
+                        color: row.key === page.selectedExcitation ?
+                                   EaStyle.Colors.themeRowHighlightHovered :
+                                   index % 2 ? EaStyle.Colors.themeBackgroundHovered2 : EaStyle.Colors.themeBackgroundHovered1
+
+                        TapHandler {
+                            onTapped: page.selectedExcitation = row.key
+                        }
+
+                        EaComponents.TableViewLabel {
+                            width: EaStyle.Sizes.fontPixelSize * 4
+                            horizontalAlignment: Text.AlignHCenter
+                            text: row.state
+                        }
+                        EaComponents.TableViewLabel {
+                            flexibleWidth: true
+                            horizontalAlignment: Text.AlignLeft
+                            text: row.spin
+                        }
+                        EaComponents.TableViewLabel {
+                            width: EaStyle.Sizes.fontPixelSize * 8
+                            horizontalAlignment: Text.AlignRight
+                            text: row.energyText
+                        }
+                        EaComponents.TableViewLabel {
+                            width: EaStyle.Sizes.fontPixelSize * 8
+                            horizontalAlignment: Text.AlignRight
+                            text: row.wavelengthText
+                        }
+                        EaComponents.TableViewLabel {
+                            width: EaStyle.Sizes.fontPixelSize * 8
+                            horizontalAlignment: Text.AlignRight
+                            text: row.strengthText
+                        }
+                    }
+                }
+
+                MinorLabel {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: Globals.BackendWrapper.resultsHasOscillatorStrengths ?
+                              qsTr('Vertical excitations from the ground state. Hover a stick for its state; click a stick or a row to select it.') :
+                              qsTr('Vertical excitations from the ground state. This method gives no oscillator strengths for an open-shell reference.')
                 }
             }
         }

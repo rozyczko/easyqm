@@ -5,12 +5,19 @@
 Each value is taken from the last block of its kind, which after an optimisation is the
 one at the final geometry. A value whose block is missing stays None, so a failed or
 stopped job yields whatever it got to.
+
+Excited states run last, in an ORCA process of their own (`OrcaAdapter.input_files`), whose
+output follows the ground-state one in the same file. That job reports the excited state's
+energy as its final energy, so the ground-state values come from the output before its
+banner and the excitations from the output after it.
 """
 
 import re
 from typing import Optional
 
 from ..results import Criterion
+from ..results import Excitation
+from ..results import ExcitedStates
 from ..results import Frequencies
 from ..results import Mode
 from ..results import Optimisation
@@ -36,19 +43,50 @@ _ZPE = re.compile(rf'Zero point energy\s+\.\.\.\s+({_NUMBER}) Eh')
 _GIBBS = re.compile(rf'Final Gibbs free energy\s+\.\.\.\s+({_NUMBER}) Eh')
 _TEMPERATURE = re.compile(rf'^Temperature\s+\.\.\.\s+({_NUMBER}) K', re.MULTILINE)
 _PRESSURE = re.compile(rf'^Pressure\s+\.\.\.\s+({_NUMBER}) atm', re.MULTILINE)
+# Where the excited-state calculation starts, and the banner each ORCA process prints first.
+EXCITED_STATES_START = re.compile(r'ORCA (?:TD-DFT\S*|CIS) CALCULATION\b|EOM-CCSD CALCULATION\b')
+_BANNER = re.compile(r'\* O   R   C   A \*')
+# The results header names the method that ran: full TD-HF starts as 'ORCA CIS CALCULATION' too.
+_EXCITED_METHOD = re.compile(r'^(TD-DFT/TDA|TD-DFT|CIS|RPA)[- ]EXCITED STATES|(EOM-CCSD) RESULTS', re.MULTILINE)
+_ABSORPTION = 'ABSORPTION SPECTRUM VIA TRANSITION ELECTRIC DIPOLE MOMENTS'
+_TRANSITION = re.compile(rf'^\s*\d+-\S+\s+->\s+(\d+)-(\d+)\S*\s+({_NUMBER})\s+{_NUMBER}\s+{_NUMBER}\s+({_NUMBER})')
+_ROOT = re.compile(rf'^IROOT=\s*(\d+):\s+{_NUMBER} au\s+({_NUMBER}) eV', re.MULTILINE)
 
 
 def parse(output: str) -> Results:
-    lines = output.splitlines()
+    start = EXCITED_STATES_START.search(output)
+    if start is None:
+        ground, excited = output, ''
+    else:
+        banners = [banner.start() for banner in _BANNER.finditer(output, 0, start.start())]
+        split = banners[-1] if banners else 0
+        ground, excited = output[:split], output[split:]
+    lines = ground.splitlines()
     homo, lumo = _frontier_orbitals(lines)
     return Results(
-        final_energy=_last_float(_FINAL_ENERGY, output),
+        final_energy=_last_float(_FINAL_ENERGY, ground),
         homo=homo,
         lumo=lumo,
-        dipole=_last_float(_DIPOLE, output),
-        optimisation=_optimisation(output, lines),
-        frequencies=_frequencies(output, lines),
+        dipole=_last_float(_DIPOLE, ground),
+        optimisation=_optimisation(ground, lines),
+        frequencies=_frequencies(ground, lines),
+        excited_states=_excited_states(excited),
     )
+
+
+def _excited_states(output: str) -> Optional[ExcitedStates]:
+    """From the last electric-dipole absorption table (for EOM-CCSD the left-right one), or
+    from the EOM roots where an open-shell reference has no transition moments."""
+    methods = _EXCITED_METHOD.findall(output)
+    if not methods:
+        return None
+    rows = _block(output.splitlines(), _ABSORPTION, _TRANSITION)
+    states = [Excitation(int(state), float(energy), int(multiplicity), float(strength))
+              for state, multiplicity, energy, strength in (row.groups() for row in rows)]
+    if not states:
+        results = output.rfind('EOM-CCSD RESULTS')
+        states = [Excitation(int(state), float(energy)) for state, energy in _ROOT.findall(output, max(results, 0))]
+    return ExcitedStates(method=''.join(methods[-1]), states=states) if states else None
 
 
 def _atoms(lines: list[str], index: int) -> list[Atom]:
