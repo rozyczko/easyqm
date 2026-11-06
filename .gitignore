@@ -1,0 +1,10 @@
+# Python bytecode and tool caches
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Build output (python -m build)
+dist/
+
+# Local Claude Code settings
+.claude/
