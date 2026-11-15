@@ -130,9 +130,14 @@ Rectangle {
                 EaElements.Label {
                     width: parent.width
                     elide: Text.ElideRight
+                    // Offline, the reason: a missing package, offline mode or no key.
                     text: Globals.BackendWrapper.assistantConfigured ?
                               Globals.BackendWrapper.assistantModelName :
-                              Globals.BackendWrapper.assistantModelName + ' · ' + qsTr('add an API key in the settings')
+                              Globals.BackendWrapper.assistantModelName + ' · ' +
+                              Globals.BackendWrapper.assistantSettingsOfflineReason
+                    ToolTip.text: Globals.BackendWrapper.assistantSettingsOfflineReason
+                    ToolTip.visible: !Globals.BackendWrapper.assistantConfigured && headerHover.hovered
+                    HoverHandler { id: headerHover }
                     font.pixelSize: EaStyle.Sizes.fontPixelSize * 0.85
                     color: EaStyle.Colors.themeForegroundMinor
                 }

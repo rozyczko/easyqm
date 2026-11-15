@@ -327,6 +327,8 @@ QtObject {
     readonly property string assistantSettingsKeyStorage: activeBackend.assistant.settings.keyStorage
     readonly property bool assistantSettingsSecureStoreAvailable: activeBackend.assistant.settings.secureStoreAvailable
     readonly property bool assistantSettingsSdkAvailable: activeBackend.assistant.settings.sdkAvailable
+    // Why the offline assistant answers ('the anthropic package is not installed …'); '' when the model does
+    readonly property string assistantSettingsOfflineReason: activeBackend.assistant.settings.offlineReason
     function assistantSettingsCheckSecureStore() { activeBackend.assistant.settings.checkSecureStore() }
     function assistantSettingsSetKey(key, remember) { activeBackend.assistant.settings.setKey(key, remember) }
     function assistantSettingsClearKey() { activeBackend.assistant.settings.clearKey() }

@@ -408,7 +408,13 @@ class Assistant(QObject):
 
     def _stub_answer(self) -> None:
         facts, data = self._workspace.snapshot()
-        self._add('assistant', self._stub.reply(self._question, facts, data))
+        text = self._stub.reply(self._question, facts, data)
+        reason = self._settings.offlineReason
+        if reason and not self._settings.offline:
+            # Not the user's choice: say why the model was not asked, or the canned answer looks
+            # like the model's.
+            text += f'\n\n*Offline answer, Claude was not asked: {reason}.*'
+        self._add('assistant', text)
         self._set_status('')
         self.busyChanged.emit()
         self.replied.emit()

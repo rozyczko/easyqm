@@ -862,6 +862,43 @@ def test_offline_the_stub_answers(chat, qcore_application):
     assert chat.assistant.modelName == StubAssistant.name
 
 
+def test_a_chosen_offline_answer_has_no_note(chat, qcore_application):
+    chat.settings.setOffline(True)
+    _turn(chat, 'Hello', qcore_application)
+    assert 'Claude was not asked' not in chat.assistant.messages[-1]['text']
+
+
+def test_without_the_sdk_the_stub_says_why_it_answers(chat, qcore_application, monkeypatch):
+    # A key is set, but the anthropic package is missing: the stub answers, and must not pass
+    # for the model.
+    monkeypatch.setattr(assistant_settings, 'sdk_available', lambda: False)
+    client = chat.script()
+    assert not chat.settings.configured and 'anthropic package is not installed' in chat.settings.offlineReason
+
+    _turn(chat, 'Hello', qcore_application)
+
+    assert client.requests == []
+    assert chat.assistant.messages[-1]['text'].endswith(
+        '*Offline answer, Claude was not asked: the anthropic package is not installed (pip install "EasyQM[llm]").*'
+    )
+
+
+def test_the_offline_reason_names_the_first_thing_missing(qcore_application, tmp_path, monkeypatch):
+    for name in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_PROFILE'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('ANTHROPIC_CONFIG_DIR', str(tmp_path / 'none'))
+    monkeypatch.setattr(assistant_settings, 'sdk_available', lambda: True)
+    settings = AssistantSettings(_settings(tmp_path), FakeKeyring())
+    assert settings.offlineReason == 'no API key: add one in the assistant settings'
+
+    settings.setKey('sk-test', False)
+    assert settings.offlineReason == '' and settings.configured
+    settings.setOffline(True)
+    assert settings.offlineReason == 'offline mode is on in the assistant settings'
+    monkeypatch.setattr(assistant_settings, 'sdk_available', lambda: False)
+    assert settings.offlineReason.startswith('the anthropic package is not installed')
+
+
 def test_show_page_reports_the_page_actually_shown(chat):
     chat.assistant.navigateRequested.connect(chat.assistant.setPage)  # as the panel does
     assert _run(chat.workspace, 'show_page', {'page': 'method'}).text == 'The method page is shown.'

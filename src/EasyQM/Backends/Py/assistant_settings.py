@@ -185,7 +185,18 @@ class AssistantSettings(QObject):
     @Property(bool, notify=changed)
     def configured(self) -> bool:
         """Whether a turn would go to the model: the SDK is installed, not offline, a credential resolves."""
-        return sdk_available() and not self.offline and bool(self.keySource)
+        return not self.offlineReason
+
+    @Property(str, notify=changed)
+    def offlineReason(self) -> str:
+        """Why turns go to the offline assistant instead of the model; '' when they go to the model."""
+        if not sdk_available():
+            return 'the anthropic package is not installed (pip install "EasyQM[llm]")'
+        if self.offline:
+            return 'offline mode is on in the assistant settings'
+        if not self.keySource:
+            return 'no API key: add one in the assistant settings'
+        return ''
 
     @Slot(str, bool)
     def setKey(self, key: str, remember: bool) -> None:
