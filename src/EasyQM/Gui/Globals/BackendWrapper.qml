@@ -303,6 +303,21 @@ QtObject {
     function assistantClear() { activeBackend.assistant.clear() }
     function assistantAnswerApproval(id, allowed) { activeBackend.assistant.answerApproval(id, allowed) }
 
+    // Assistant speech: push-to-talk (the text comes as assistantVoiceTranscribed) and reading aloud
+    readonly property bool assistantVoiceInputEnabled: activeBackend.assistant.voice.inputEnabled
+    readonly property bool assistantVoiceRecognitionAvailable: activeBackend.assistant.voice.recognitionAvailable
+    readonly property string assistantVoiceModelFolder: activeBackend.assistant.voice.modelFolder
+    readonly property int assistantVoiceModelMegabytes: activeBackend.assistant.voice.modelMegabytes
+    readonly property bool assistantVoiceListening: activeBackend.assistant.voice.listening
+    readonly property bool assistantVoiceTranscribing: activeBackend.assistant.voice.transcribing
+    readonly property bool assistantVoiceSpeaking: activeBackend.assistant.voice.speaking
+    // Why nothing was transcribed, or that the speech model is loading; '' otherwise
+    readonly property string assistantVoiceMessage: activeBackend.assistant.voice.message
+    function assistantVoiceStartListening() { activeBackend.assistant.voice.startListening() }
+    function assistantVoiceStopListening() { activeBackend.assistant.voice.stopListening() }
+    function assistantVoiceCancel() { activeBackend.assistant.voice.cancel() }
+    function assistantVoiceStopSpeaking() { activeBackend.assistant.voice.stopSpeaking() }
+
     // Assistant settings (the settings dialog)
     readonly property string assistantSettingsModel: activeBackend.assistant.settings.model
     readonly property var assistantSettingsModelChoices: activeBackend.assistant.settings.modelChoices
@@ -319,6 +334,10 @@ QtObject {
     function assistantSettingsSetSendResults(value) { activeBackend.assistant.settings.setSendResults(value) }
     readonly property bool assistantSettingsOffline: activeBackend.assistant.settings.offline
     function assistantSettingsSetOffline(value) { activeBackend.assistant.settings.setOffline(value) }
+    readonly property bool assistantSettingsSpeechInput: activeBackend.assistant.settings.speechInput
+    function assistantSettingsSetSpeechInput(value) { activeBackend.assistant.settings.setSpeechInput(value) }
+    readonly property bool assistantSettingsReadAloud: activeBackend.assistant.settings.readAloud
+    function assistantSettingsSetReadAloud(value) { activeBackend.assistant.settings.setReadAloud(value) }
     // The key itself is never readable from QML
     readonly property bool assistantSettingsHasKey: activeBackend.assistant.settings.hasKey
     // 'assistant settings' | 'environment variable' | 'Anthropic CLI profile' | '' (none)
@@ -345,6 +364,7 @@ QtObject {
     signal assistantReplied()
     signal assistantNavigateRequested(string page)
     signal assistantSettingsVerified(string message)
+    signal assistantVoiceTranscribed(string text)
 
     Component.onCompleted: {
         activeBackend.project.projectSaved.connect(projectSaved)
@@ -356,6 +376,7 @@ QtObject {
         activeBackend.assistant.replied.connect(assistantReplied)
         activeBackend.assistant.navigateRequested.connect(assistantNavigateRequested)
         activeBackend.assistant.settings.verified.connect(assistantSettingsVerified)
+        activeBackend.assistant.voice.transcribed.connect(assistantVoiceTranscribed)
     }
 
 }

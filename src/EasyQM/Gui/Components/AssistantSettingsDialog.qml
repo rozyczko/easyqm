@@ -188,6 +188,37 @@ EaElements.Dialog {
             onToggled: Globals.BackendWrapper.assistantSettingsSetOffline(checked)
         }
 
+        // Speech
+
+        EaElements.Label {
+            topPadding: EaStyle.Sizes.fontPixelSize * 0.5
+            font.bold: true
+            text: qsTr('Speech')
+        }
+
+        EaElements.CheckBox {
+            text: qsTr('Talk to the assistant (hold the microphone button or Ctrl+Space)')
+            checked: Globals.BackendWrapper.assistantSettingsSpeechInput
+            onToggled: Globals.BackendWrapper.assistantSettingsSetSpeechInput(checked)
+        }
+
+        EaElements.Label {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            color: EaStyle.Colors.themeForegroundMinor
+            text: Globals.BackendWrapper.assistantVoiceRecognitionAvailable ?
+                      qsTr('Speech is recognised on this computer; only the text is sent. The first use downloads the speech model (about %1 MB) to %2.')
+                          .arg(Globals.BackendWrapper.assistantVoiceModelMegabytes).arg(Globals.BackendWrapper.assistantVoiceModelFolder) :
+                      qsTr('Speech recognition is not installed: pip install "EasyQM[voice]".')
+        }
+
+        EaElements.CheckBox {
+            text: qsTr('Read answers aloud')
+            checked: Globals.BackendWrapper.assistantSettingsReadAloud
+            onToggled: Globals.BackendWrapper.assistantSettingsSetReadAloud(checked)
+        }
+
         EaElements.Label {
             width: parent.width
             wrapMode: Text.WordWrap

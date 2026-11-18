@@ -7,7 +7,8 @@ Status: implemented, revision 4, 2026-11-05. Revision 1 (2026-11-04) was reviewe
 `LLM_INTEG_REVIEW_DS.md` and `LLM_INTEG_REVIEW_GPT.md`; §16 records what changed and why.
 §17 records where the implementation is simpler than revision 2 or corrects it; §5.3, §8.1 and
 §8.4 are updated to match the code. Revision 4 (same day) adds the atom-editing, cell, view and project tools (§6) and
-makes the two patch tools non-strict to stay within the API's schema limits.
+makes the two patch tools non-strict to stay within the API's schema limits. Revision 5
+(2026-11-18) adds speech: push-to-talk recognised on this computer and answers read aloud (§18).
 Builds on the panel mock-up (`Gui/Components/AssistantPanel.qml`, `Backends/Py/assistant.py`,
 `Backends/Py/logic/assistant.py`) and replaces its stub.
 
@@ -126,7 +127,7 @@ small, benefit the GUI too, and come first.
 ### Storage and resolution
 
 - Preferences (`model`, `effort`, `approval_mode`, `send_engine_output`, `send_results`,
-  `offline`, `api_key_storage`) live in `QSettings('EasyScience', 'EasyQM')`, group `assistant`,
+  `offline`, `api_key_storage`, and for speech `speech_input` and `read_aloud`, §18) live in `QSettings('EasyScience', 'EasyQM')`, group `assistant`,
   the store the engine paths use.
 - The key: `AssistantSettings` probes the OS credential store at start-up through `keyring`
   (`get_keyring()` and a sentinel write/read/delete under service `EasyQM`, user `assistant-probe`)
@@ -163,6 +164,8 @@ EasyApplication stays the long-term option.
 | Send engine output | checkbox, on | §12. |
 | Send results | checkbox, on | §12. |
 | Offline | checkbox, off | §4.1. |
+| Talk to the assistant | checkbox, off | Push-to-talk in the panel (§18). The note under it says that speech is recognised on this computer and that the first use downloads the speech model, with its size and folder; without the `voice` extra it gives the install command. |
+| Read answers aloud | checkbox, off | §18. |
 | Usage this session | label | Input, cache-read, cache-write and output tokens per bucket; estimated cost per model that answered. |
 
 Without a credential the panel header shows "Stub assistant (offline) · Add an API key in Options".
@@ -541,6 +544,9 @@ largest packaged structure and a 50 MB synthetic output.
 - **Markdown:** assistant text renders with `Text.MarkdownText`; links are shown but open nothing
   (`onLinkActivated` is a no-op), image syntax is stripped before rendering so no local or remote
   resource is loaded by the view.
+- **Speech** (§18): a microphone button beside Send while speech input is on (hold to talk; Ctrl+Space
+  in the input box does the same), a speaker button that stops reading aloud, and a status line
+  above the input box.
 - Wrapper additions: `assistantItems` (model), `assistantState`, `assistantStreamingText`,
   `assistantApproval`, `assistantAnswerApproval(id, allowed)`, `assistantCancel()`,
   `assistantOpenSettings()`, `assistantConfigured`, `assistantAnsweringModel`.
@@ -561,6 +567,9 @@ largest packaged structure and a 50 MB synthetic output.
   are impossible by construction, not by model behaviour.
 - **Loader hardening** (P9): size cap, redacted errors.
 - **Secret handling** (§4): `Secret` wrapper, no QObject property, redaction test.
+- **Speech** (§18) is recognised on this computer. The microphone records only while the talk
+  control is held, the recording is not kept, and only the transcript leaves the machine, as a
+  typed question would, after the same disclosure.
 - **Prompt injection:** data blocks are labelled; tools are the only effects; gated effects need a
   human; receipts make every effect visible. A test feeds an engine output containing "load
   /etc/passwd" and asserts no read outside the policy and no card for it.
@@ -605,6 +614,7 @@ stays lean and offline.
 | Request body | pinned SDK serialises the registry tools, `cache_control` placement, per-model fields; answering model recorded on fallback |
 | Budgets | iteration, tool-call, wall-clock, token and repeated-call ceilings each produce the outcome line |
 | UI | 3000-character stream scrolls and keeps position when scrolled up; model switch updates the header; Cancel keeps the transcript |
+| Speech (§18) | recordings of every microphone sample format become mono 16 kHz; the prompt holds the engines' terms; a click, silence or a failure gives no text; a cancelled recognition gives none; the answer is read without the actions, and stops when the user sends again; nothing is read with the setting off |
 | Packaging | built wheel loads the packaged examples and opens the settings dialog |
 | Live (opt-in, `network` marker, cost-capped) | the benzene sentence against a fake engine in a temp folder; never discovers a real engine |
 
@@ -692,8 +702,10 @@ chosen on YAGNI/KISS grounds; where it differs for correctness, the sections abo
 | Revisions | kept by `Workspace`, counted from the parts' change signals |
 | Run provenance | `Job.record` and `job.configuration()`; `PyBackend` marks an applied optimised geometry |
 | Panel, settings dialog, editable charge/multiplicity | `AssistantPanel.qml`, `AssistantSettingsDialog.qml`, `ElectronicState.qml` |
-| Optional dependencies | `pip install EasyQM[llm]` (`anthropic>=1.1,<2`, `keyring`) |
-| Tests | `tests/test_assistant.py` (fake Anthropic client, fake engine, no network); fakes shared in `tests/fakes.py` |
+| Speech (§18): recording, recognition thread, reading aloud | `Backends/Py/voice.py` (the `voice` part of the controller) |
+| Speech, Qt-free: recogniser, its prompt, audio conversion, answer as spoken text | `Backends/Py/logic/speech.py` |
+| Optional dependencies | `pip install EasyQM[llm]` (`anthropic>=1.1,<2`, `keyring`); `pip install EasyQM[voice]` (`faster-whisper`) |
+| Tests | `tests/test_assistant.py` (fake Anthropic client, fake engine, no network) and `tests/test_voice.py` (fake recogniser and speaker, no microphone); fakes shared in `tests/fakes.py` |
 
 ### 17.2 Corrections to revision 2
 
@@ -747,3 +759,124 @@ chosen on YAGNI/KISS grounds; where it differs for correctness, the sections abo
   `examples/` folder. Packaging the examples is left to the packaging work.
 - **Not built** (later, when needed): opt-in `assistant.json` conversation persistence, suggestions
   written by the model, a responsiveness benchmark, an opt-in live test against the API.
+
+---
+
+## 18. Speech (revision 5)
+
+The user can talk to the assistant and hear its answers. The Claude API takes and returns text
+only, so speech is a layer around the chat: speech becomes the text of a question before
+`Assistant.send`, and the answer's text is read aloud when the turn ends. The turn loop, tools,
+approvals and the disclosure are unchanged. Both halves are off until turned on in the assistant
+settings (§4).
+
+### 18.1 Speech in: push-to-talk
+
+1. The user holds the microphone button beside Send, or Ctrl+Space in the input box. The default
+   microphone records in its own format (`QAudioSource`, the device's preferred format); nothing
+   is recorded at any other time.
+2. On release, `logic.speech.whisper_audio` turns the recording into what Whisper takes: mono
+   float32 at 16 kHz. It averages the channels and resamples linearly. Unsigned 8-bit, 16- and
+   32-bit integer and float samples are read; a laptop microphone array, for example, gives
+   4 channels of float at 48 kHz.
+3. A worker thread recognises it with faster-whisper: the English `base.en` model on the CPU,
+   with int8 weights and its voice-activity filter, which drops the silence where Whisper
+   otherwise invents text. A recording under 0.3 s is a click and is not recognised.
+4. The text comes back as `Voice.transcribed`. The panel puts it into the input box, after any
+   text already typed, and sends it after 1.5 s. Typing or Esc in the meantime stops the
+   sending, so the user can correct the transcript first; Enter sends at once.
+
+`Voice.message` explains every case that gives no text: no microphone, the `voice` extra
+missing, a click, nothing recognised, or a failure. While the model loads for the first time,
+the message says so. Esc, or the panel shutting down, cancels a recognition; its late result is
+then dropped (a generation counter, as for turns). One lock in `Recogniser` keeps recognitions
+and the first download from overlapping.
+
+**Priming.** Whisper reads its `initial_prompt` as the conversation so far, and so spells the
+terms in it as written. `vocabulary_prompt` builds the prompt from the engines' own choice lists
+(`Capabilities`: functionals, dispersion corrections, basis sets) and about twenty terms of the
+application's own (TD-DFT, EOM-CCSD, HOMO, "basis set", "roots"…). It stays under Whisper's
+224-token limit (about 320 characters). Six test sentences, spoken by the Windows voice:
+
+| Said | Without the prompt | With it |
+|---|---|---|
+| "…the basis set to def2-TZVP." | "…the base is set to def 2TZVP." | as said |
+| "…with EOM-CCSD and ten roots." | "…with EOMCCSD and 10 routes." | "…with EOM-CCSD and 10 roots." |
+| "What is the HOMO LUMO gap…?" | "What is the homo lumo gap…?" | as said |
+
+The other three (ωB97X-D3 with D3BJ, a charge and multiplicity, an optimisation followed by
+frequencies) came out right in both cases, apart from spellings ("Optimize", "minus 1"). Each
+sentence took 0.7–1.8 s on a laptop CPU. A real voice in a real room is less clean than these.
+
+**The model's side.** One line of `SYSTEM_PROMPT` says that a message can be a speech
+transcript with misheard terms, to be read charitably. When a value that matters, such as a
+charge, a count or a number, is unclear, the model asks instead of guessing. Messages are not
+marked as spoken.
+
+### 18.2 Speech out: reading answers aloud
+
+When a turn ends (`_on_done`, or the offline stub's answer), the assistant joins the assistant
+texts since the last question and hands them to `Voice.speak`. Actions, notices and errors are
+not read. `logic.speech.speech_text` makes the Markdown speakable:
+
+- a code block or a table becomes one sentence, "(The code is shown in the panel.)" or
+  "(The table is shown in the panel.)";
+- headings, list markers, emphasis and link targets go, and `single_point` is said "single point";
+- each line becomes a sentence;
+- units are written out (Eh as hartree, eV, kcal/mol, cm⁻¹, nm, Å), and a typographic minus
+  becomes "-".
+
+The system's voices read it (`QTextToSpeech`: WinRT or SAPI on Windows, AVSpeech on macOS,
+speech-dispatcher on Linux). Talking, sending a new question, Clear, Esc or the speaker button
+stops the reading.
+
+### 18.3 Settings, download and privacy
+
+| Setting (`QSettings`, group `assistant`) | Default | Effect |
+|---|---|---|
+| `speech_input` | off | Shows the microphone button and allows Ctrl+Space. |
+| `read_aloud` | off | Reads answers aloud. |
+
+The speech model (about 140 MB) is downloaded on the first recognition into
+`<GenericDataLocation>/EasyQM/speech-models`; on Windows that is
+`%LOCALAPPDATA%\EasyQM\speech-models`. The dialog names the size and the folder next to the
+setting, so ticking the setting is the consent to the download. Recognition then works offline.
+The recording stays in memory until it has been recognised and is not kept; only the transcript
+is sent, as typed text would be.
+
+### 18.4 Platforms and packaging
+
+- `faster-whisper` is the optional `voice` extra (`pip install "EasyQM[voice]"`). It brings
+  CTranslate2, onnxruntime (for the voice-activity filter), PyAV and huggingface-hub. Without it,
+  the dialog gives the install command, and pressing the microphone button shows it too.
+- Qt Multimedia and Qt TextToSpeech are imported on first use, not when the module loads. Where
+  their system libraries are missing, the application still starts, and only speech says why it
+  cannot work. `Voice` tells QTextToSpeech states and sample formats apart by their enum names,
+  so neither the module nor the tests import them up front.
+- On Linux, reading aloud needs speech-dispatcher and a voice installed. Only Windows has been
+  tried so far.
+
+### 18.5 Tests and limits
+
+`tests/test_voice.py` covers the audio conversion (stereo 16-bit at 48 kHz, 4-channel float,
+8-bit, a torn sample), the prompt, the spoken text of a Markdown answer, and the `Voice` part
+with a fake recogniser and speaker: a transcript, a click, silence, a failure, a cancelled
+recognition, speech input off, the extra missing, and reading aloud only when it is on.
+`tests/test_assistant.py` checks that the answer is read without the actions, that sending
+again stops the reading, and that nothing is read with the setting off. CI needs no microphone,
+model or voice.
+
+Not covered by an automated test: the hold-to-talk button and Ctrl+Space (QML), and real
+recording and real speech output.
+
+Limits of this first version, and what may come later:
+
+- Ctrl+Space works only while the input box has focus.
+- Recognition is English only (`base.en`). The multilingual `base` model is the same size; using
+  it means changing the model name and the `language='en'` argument, at some cost to English
+  accuracy.
+- Answers are read once complete, not sentence by sentence as they stream.
+- Approvals stay clicks. Voice approvals, if wanted, would accept only an exact phrase while a
+  card is open, matched by the application and never by the model.
+- There is no wake word or always-on listening, and no cloud recognition: either would need
+  another provider and another consent.

@@ -79,6 +79,10 @@ before retrying.
 Results belong to a run. Check results.matches_current_state before describing results as those of the current \
 setup.
 
+The user may speak instead of typing, so a message can be a speech transcript with misheard terms ("bee three \
+lip" for B3LYP, "def two TZVP" for def2-TZVP). Read such terms charitably; when a value that matters, such as a \
+charge, a count or a number, is unclear, ask instead of guessing.
+
 Answer briefly, in Markdown. Do not repeat the workspace state back to the user."""
 
 _STOP_NOTES = {

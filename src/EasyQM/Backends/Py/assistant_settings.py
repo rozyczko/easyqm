@@ -142,6 +142,25 @@ class AssistantSettings(QObject):
     def setOffline(self, value: bool) -> None:
         self._set('offline', bool(value))
 
+    # Speech (Voice): off until the user turns it on; the first use of speech input downloads
+    # the speech model.
+
+    @Property(bool, notify=changed)
+    def speechInput(self) -> bool:
+        return self._flag('speech_input', False)
+
+    @Slot(bool)
+    def setSpeechInput(self, value: bool) -> None:
+        self._set('speech_input', bool(value))
+
+    @Property(bool, notify=changed)
+    def readAloud(self) -> bool:
+        return self._flag('read_aloud', False)
+
+    @Slot(bool)
+    def setReadAloud(self, value: bool) -> None:
+        self._set('read_aloud', bool(value))
+
     # Credential
 
     @Property(bool, notify=changed)

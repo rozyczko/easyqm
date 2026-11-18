@@ -45,6 +45,9 @@ llm = [
   'anthropic>=1.1,<2',        # Claude API client
   'keyring',                  # Remembering the API key in the system credential store
 ]
+voice = [
+  'faster-whisper',           # Speech recognition on this computer, for talking to the assistant
+]
 
 [project.urls]
 'Source Code' = 'https://github.com/easyscience/easyqm'

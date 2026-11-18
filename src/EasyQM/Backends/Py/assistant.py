@@ -8,7 +8,8 @@ The controller owns the conversation sent to the model (`_history`), the items t
 workspace checks them and runs them, after the user's approval when their effect needs one.
 Every worker event carries the turn id, so events of a cancelled or cleared turn change nothing.
 Without a configured model the offline stub answers. The first question of a session waits until
-the user agrees to what is shared with the model.
+the user agrees to what is shared with the model. The `voice` part turns speech into questions and
+reads the answers aloud, when the settings say so.
 """
 
 import json
@@ -27,6 +28,7 @@ from .assistant_settings import AssistantSettings
 from .logic.assistant import StubAssistant
 from .logic.claude_backend import USAGE_KEYS
 from .logic.claude_backend import Turn
+from .voice import Voice
 from .workspace import TOOLS
 from .workspace import Action
 from .workspace import Outcome
@@ -66,7 +68,7 @@ class Assistant(QObject):
     replied = Signal()
 
     def __init__(self, workspace: Workspace, settings: Optional[AssistantSettings] = None,
-                 delay_ms: int = STUB_DELAY_MS, parent=None):
+                 delay_ms: int = STUB_DELAY_MS, voice: Optional[Voice] = None, parent=None):
         super().__init__(parent)
         self._workspace = workspace
         workspace.navigate = self.navigateRequested.emit
@@ -87,6 +89,8 @@ class Assistant(QObject):
         self._answering_model = ''
         self._disclosed = False
         self._question = ''
+        self._asked_at = 0  # index in `_items` of the last question: its answer is read aloud
+        self._voice = voice if voice is not None else Voice(self._settings, parent=self)
 
         self._stub_timer = QTimer(self, singleShot=True, interval=delay_ms)
         self._stub_timer.timeout.connect(self._stub_answer)
@@ -107,6 +111,10 @@ class Assistant(QObject):
     @Property('QVariant', constant=True)
     def settings(self) -> AssistantSettings:
         return self._settings
+
+    @Property('QVariant', constant=True)
+    def voice(self) -> Voice:
+        return self._voice
 
     @Property(str, notify=modelChanged)
     def modelName(self) -> str:
@@ -183,6 +191,8 @@ class Assistant(QObject):
         if not question or self.busy or self._approval is not None:
             return
         self._declined.clear()
+        self._voice.stopSpeaking()
+        self._asked_at = len(self._items)
         self._add('user', question)
         if not self._settings.configured:
             self._question = question
@@ -259,6 +269,7 @@ class Assistant(QObject):
     def clear(self) -> None:
         """Forget the conversation; a turn in progress is cancelled and its answer dropped."""
         self.cancel()
+        self._voice.stopSpeaking()
         self._take_approval()  # a first question still waiting to be shared
         self._generation += 1
         self._items, self._history = [], []
@@ -273,6 +284,7 @@ class Assistant(QObject):
     def shutdown(self) -> None:
         """At quit: cancel a turn and give its thread a bounded time to end."""
         self.cancel()
+        self._voice.cancel()
         if self._thread is not None:
             self._thread.join(SHUTDOWN_WAIT_S)
 
@@ -395,6 +407,7 @@ class Assistant(QObject):
                 self._add('error', result.error)
             elif result.note:
                 self._add('notice', result.note)
+            self._read_answer()
         else:
             self._streaming = ''
             self.streamingTextChanged.emit()
@@ -415,11 +428,18 @@ class Assistant(QObject):
             # like the model's.
             text += f'\n\n*Offline answer, Claude was not asked: {reason}.*'
         self._add('assistant', text)
+        self._read_answer()
         self._set_status('')
         self.busyChanged.emit()
         self.replied.emit()
 
     # Helpers
+
+    def _read_answer(self) -> None:
+        """Read the answer to the last question aloud: its text, not the actions or notices."""
+        answer = '\n\n'.join(item['text'] for item in self._items[self._asked_at:] if item['role'] == 'assistant')
+        if answer:
+            self._voice.speak(answer)
 
     def _add(self, role: str, text: str, ok: bool = True, page: str = '') -> None:
         self._items.append({'id': len(self._items), 'role': role, 'text': text, 'ok': ok, 'page': page})

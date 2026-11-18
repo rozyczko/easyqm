@@ -92,6 +92,21 @@ Rectangle {
         }
         // The show_page tool.
         function onAssistantNavigateRequested(page) { panel.showPage(page) }
+        // Speech: the transcript goes into the input box, after what was typed, and is sent
+        // after a pause unless the user types or presses Esc.
+        function onAssistantVoiceTranscribed(text) {
+            const typed = input.text.trim()
+            input.text = typed ? `${typed} ${text}` : text
+            input.cursorPosition = input.text.length
+            input.forceActiveFocus()
+            voiceSendTimer.restart()
+        }
+    }
+
+    Timer {
+        id: voiceSendTimer
+        interval: 1500
+        onTriggered: panel.send(input.text)
     }
 
     /////////
@@ -341,7 +356,7 @@ Rectangle {
     Flow {
         id: suggestions
 
-        anchors.bottom: inputBox.top
+        anchors.bottom: voiceStatus.visible ? voiceStatus.top : inputBox.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.margins: EaStyle.Sizes.fontPixelSize
@@ -363,6 +378,33 @@ Rectangle {
     // Input
     ////////
 
+    // What speech input is doing, above the input box.
+    EaElements.Label {
+        id: voiceStatus
+
+        anchors.bottom: inputBox.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: EaStyle.Sizes.fontPixelSize
+        anchors.rightMargin: EaStyle.Sizes.fontPixelSize
+        bottomPadding: EaStyle.Sizes.fontPixelSize * 0.25
+        visible: text !== ''
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+        color: EaStyle.Colors.themeForegroundMinor
+        text: {
+            if (Globals.BackendWrapper.assistantVoiceListening)
+                return qsTr('Listening… release to stop.')
+            if (Globals.BackendWrapper.assistantVoiceTranscribing)
+                return Globals.BackendWrapper.assistantVoiceMessage || qsTr('Recognising…')
+            if (voiceSendTimer.running)
+                return qsTr('Sending… type or press Esc to edit it first.')
+            if (Globals.BackendWrapper.assistantVoiceSpeaking)
+                return qsTr('Reading the answer aloud. Esc or the speaker button stops it.')
+            return Globals.BackendWrapper.assistantVoiceMessage
+        }
+    }
+
     Rectangle {
         id: inputBox
 
@@ -381,7 +423,7 @@ Rectangle {
         Flickable {
             anchors.fill: parent
             anchors.margins: 1
-            anchors.rightMargin: sendButton.width + EaStyle.Sizes.fontPixelSize * 0.5
+            anchors.rightMargin: inputButtons.width + EaStyle.Sizes.fontPixelSize * 0.5
             clip: true
             boundsBehavior: Flickable.StopAtBounds
 
@@ -402,23 +444,74 @@ Rectangle {
                     }
                 }
                 Keys.onEnterPressed: (event) => Keys.returnPressed(event)
+
+                // Push-to-talk: hold Ctrl+Space. Any other key keeps a transcript from being sent.
+                Keys.onPressed: (event) => {
+                    voiceSendTimer.stop()
+                    if (event.key === Qt.Key_Space && (event.modifiers & Qt.ControlModifier)
+                            && Globals.BackendWrapper.assistantVoiceInputEnabled) {
+                        if (!event.isAutoRepeat) {
+                            Globals.BackendWrapper.assistantVoiceStartListening()
+                        }
+                        event.accepted = true
+                    }
+                }
+                Keys.onReleased: (event) => {
+                    if (event.key === Qt.Key_Space && !event.isAutoRepeat && Globals.BackendWrapper.assistantVoiceListening) {
+                        Globals.BackendWrapper.assistantVoiceStopListening()
+                        event.accepted = true
+                    }
+                }
+                Keys.onEscapePressed: {
+                    voiceSendTimer.stop()
+                    Globals.BackendWrapper.assistantVoiceCancel()
+                    Globals.BackendWrapper.assistantVoiceStopSpeaking()
+                }
             }
 
             ScrollBar.vertical: EaElements.ScrollBar {}
         }
 
-        // Send, or stop the answer being written; a running engine job is not stopped.
-        EaElements.ToolButton {
-            id: sendButton
+        Row {
+            id: inputButtons
 
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.margins: EaStyle.Sizes.fontPixelSize * 0.25
-            fontIcon: panel.busy ? 'stop' : 'paper-plane'
-            highlighted: enabled
-            enabled: panel.busy ? Globals.BackendWrapper.assistantStatus !== 'Cancelling' : input.text.trim() !== ''
-            ToolTip.text: panel.busy ? qsTr('Stop the answer') : qsTr('Send')
-            onClicked: panel.busy ? Globals.BackendWrapper.assistantCancel() : panel.send(input.text)
+
+            // Stop reading the answer aloud.
+            EaElements.ToolButton {
+                visible: Globals.BackendWrapper.assistantVoiceSpeaking
+                fontIcon: 'volume-mute'
+                ToolTip.text: qsTr('Stop reading aloud')
+                onClicked: Globals.BackendWrapper.assistantVoiceStopSpeaking()
+            }
+
+            // Push-to-talk: speech is recognised on this computer when the button is released.
+            EaElements.ToolButton {
+                visible: Globals.BackendWrapper.assistantVoiceInputEnabled
+                enabled: !panel.approvalPending && !Globals.BackendWrapper.assistantVoiceTranscribing
+                fontIcon: 'microphone'
+                highlighted: Globals.BackendWrapper.assistantVoiceListening
+                ToolTip.text: qsTr('Hold to speak, or hold Ctrl+Space in the input box')
+                onPressed: {
+                    voiceSendTimer.stop()
+                    Globals.BackendWrapper.assistantVoiceStartListening()
+                }
+                onReleased: Globals.BackendWrapper.assistantVoiceStopListening()
+                onCanceled: Globals.BackendWrapper.assistantVoiceStopListening()
+            }
+
+            // Send, or stop the answer being written; a running engine job is not stopped.
+            EaElements.ToolButton {
+                id: sendButton
+
+                fontIcon: panel.busy ? 'stop' : 'paper-plane'
+                highlighted: enabled
+                enabled: panel.busy ? Globals.BackendWrapper.assistantStatus !== 'Cancelling' : input.text.trim() !== ''
+                ToolTip.text: panel.busy ? qsTr('Stop the answer') : qsTr('Send')
+                onClicked: panel.busy ? Globals.BackendWrapper.assistantCancel() : panel.send(input.text)
+            }
         }
     }
 
