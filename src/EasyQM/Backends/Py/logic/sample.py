@@ -7,6 +7,7 @@ and from CIF files by `read_cif`. A crystal holds the full content of its unit c
 symmetry is expanded on reading, and the atoms are wrapped into the cell.
 """
 
+import itertools
 import math
 import re
 from collections import Counter
@@ -352,6 +353,37 @@ class Sample:
         self.cell = cell
         for atom, position in zip(self.atoms, fractional):
             atom.x, atom.y, atom.z = cell.cartesian(*position)
+
+    def make_supercell(self, na: int, nb: int, nc: int) -> None:
+        """Replace a crystal's cell by na × nb × nc of them along a, b, c, with their atoms.
+
+        The atoms come cell by cell (c fastest, then b, then a), each cell in the order of the
+        original, and are numbered anew: 'Na1' … 'Cl64'. Copies of a fixed atom are fixed. The
+        charge is that of all the cells; a multiplicity the electron count no longer allows goes
+        to the lowest one it allows. The space group goes: the larger cell has other
+        translations.
+
+        :raises ValueError: for a molecule or a count below 1; nothing changes then.
+        """
+        if self.cell is None:
+            raise ValueError('A molecule has no unit cell to repeat.')
+        counts = (na, nb, nc)
+        if not all(isinstance(count, int) and count >= 1 for count in counts):
+            raise ValueError('A supercell holds at least one cell along each of a, b, c.')
+        if counts == (1, 1, 1):
+            return
+        cell = self.cell
+        atoms = []
+        for image in itertools.product(*(range(count) for count in counts)):
+            shift = cell.cartesian(*image)
+            for atom in self.atoms:
+                label = f'{atom.element}{len(atoms) + 1}'
+                atoms.append(Atom(label, atom.element, atom.x + shift[0], atom.y + shift[1], atom.z + shift[2], atom.fixed))
+        self.cell = Cell(tuple(tuple(count * x for x in vector) for vector, count in zip(cell.vectors, counts)))
+        _wrap(atoms, self.cell)
+        self.atoms = atoms
+        self.charge *= math.prod(counts)
+        self._electrons_changed()
 
 
 def read_xyz(text: str) -> tuple[list[Atom], Optional[Cell]]:

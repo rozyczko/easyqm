@@ -6,6 +6,7 @@ An adapter's `parse()` fills a `Results` from the engine output. Every field is 
 what the output does not contain stays None, and the Summary page shows only what is there.
 """
 
+import math
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Optional
@@ -98,6 +99,106 @@ class ExcitedStates:
     states: list[Excitation]
 
 
+# Levels of a crystal: channel (one, or spin up and down) -> k-point -> band energies in eV.
+Levels = list[list[list[float]]]
+
+
+@dataclass(frozen=True)
+class BandEdge:
+    energy: float  # eV
+    k: int  # index of the k-point where the edge is
+    band: int  # zero-based
+
+
+@dataclass
+class BandStructure:
+    """Bands along the path: distances in Å⁻¹, one per k-point, starting again where `starts`
+    says (a jump between two branches keeps the distance)."""
+
+    distances: list[float]
+    levels: Levels
+    ticks: list[tuple[float, str]]  # (distance, name) of the named points; 'X|U' at a jump
+    starts: list[int]  # first k-point of each branch
+    filled: Optional[list[int]] = None  # filled bands per channel; None when a band is partly filled
+    lattice: str = ''
+    kpoints: list[tuple[float, float, float]] = field(default_factory=list)  # as the engine prints them
+
+    def edges(self) -> Optional[tuple[BandEdge, BandEdge]]:
+        """Valence band maximum and conduction band minimum along the path; None for a metal."""
+        return band_edges(self.levels, self.filled)
+
+    def same_point(self, first: int, second: int) -> bool:
+        """Whether two k-points of the path are one point (Γ is passed more than once)."""
+        if first == second:
+            return True
+        if len(self.kpoints) != len(self.distances):
+            return False
+        return all(abs(a - b) < 1e-6 for a, b in zip(self.kpoints[first], self.kpoints[second]))
+
+    def location(self, k: int) -> str:
+        """Where a k-point is on the path: 'Γ', or 'Γ–X' between two named points."""
+        distance = self.distances[k]
+        names = [name for x, name in self.ticks if abs(x - distance) < 1e-6]
+        if names:
+            # At a jump 'X|U' the first k-point is X, the next U.
+            parts = names[0].split('|')
+            return parts[-1] if k in self.starts else parts[0]
+        before = [name for x, name in self.ticks if x < distance]
+        after = [name for x, name in self.ticks if x > distance]
+        if not before or not after:
+            return ''
+        return f'{before[-1].split("|")[-1]}–{after[0].split("|")[0]}'
+
+
+@dataclass
+class DensityOfStates:
+    """The levels on the DOS k-point grid with their weights; the broadened curve is drawn
+    from them, so the broadening can change without a new job."""
+
+    levels: Levels
+    weights: list[float]  # per k-point, as pw.x prints them: summing to 2 without spin, 1 per spin channel
+    fermi_energy: Optional[float] = None  # eV
+    filled: Optional[list[int]] = None
+
+    def curve(self, energies: list[float], broadening: float) -> list[float]:
+        """States per eV per cell at `energies`, each level a Gaussian of standard deviation
+        `broadening` (eV)."""
+        norm = 1 / (broadening * math.sqrt(2 * math.pi))
+        reach = 5 * broadening
+        values = [0.0] * len(energies)
+        if not energies:
+            return values
+        start, step = energies[0], (energies[-1] - energies[0]) / max(len(energies) - 1, 1)
+        for channel in self.levels:
+            for k, levels in enumerate(channel):
+                weight = self.weights[k % len(self.weights)] * norm
+                for level in levels:
+                    first = max(0, math.ceil((level - reach - start) / step)) if step else 0
+                    last = min(len(energies) - 1, math.floor((level + reach - start) / step)) if step else 0
+                    for i in range(first, last + 1):
+                        x = (energies[i] - level) / broadening
+                        values[i] += weight * math.exp(-0.5 * x * x)
+        return values
+
+
+def band_edges(levels: Levels, filled: Optional[list[int]]) -> Optional[tuple[BandEdge, BandEdge]]:
+    """The highest filled and the lowest empty level over every channel and k-point; None when
+    a band is partly filled, an empty band is missing or the two overlap (a metal)."""
+    if filled is None or len(filled) != len(levels):
+        return None
+    valence = conduction = None
+    for channel, count in zip(levels, filled):
+        for k, energies in enumerate(channel):
+            if count < 1 or len(energies) <= count:
+                return None
+            top, bottom = BandEdge(energies[count - 1], k, count - 1), BandEdge(energies[count], k, count)
+            valence = top if valence is None or top.energy > valence.energy else valence
+            conduction = bottom if conduction is None or bottom.energy < conduction.energy else conduction
+    if valence is None or conduction.energy <= valence.energy:
+        return None
+    return valence, conduction
+
+
 @dataclass
 class Results:
     final_energy: Optional[float] = None  # Eh, the last energy of the job
@@ -110,6 +211,8 @@ class Results:
     optimisation: Optional[Optimisation] = None
     frequencies: Optional[Frequencies] = None
     excited_states: Optional[ExcitedStates] = None
+    band_structure: Optional[BandStructure] = None
+    density_of_states: Optional[DensityOfStates] = None
 
     @property
     def gap(self) -> Optional[float]:

@@ -611,6 +611,153 @@ Rectangle {
                               qsTr('Vertical excitations from the ground state. This method gives no oscillator strengths for an open-shell reference.')
                 }
             }
+
+            // Band structure and density of states card: one energy axis for both
+
+            Column {
+                id: electronicCard
+
+                readonly property bool hasBands: Globals.BackendWrapper.resultsHasBandStructure
+                readonly property bool hasDos: Globals.BackendWrapper.resultsHasDensityOfStates
+                readonly property var bands: Globals.BackendWrapper.resultsBandStructure
+                readonly property string reference: Globals.BackendWrapper.resultsEnergyReference
+                readonly property string energyTitle: reference === 'VBM' ? qsTr('Energy − VBM (eV)') :
+                                                      reference === 'E_F' ? qsTr('Energy − Fermi energy (eV)') : qsTr('Energy (eV)')
+                readonly property real plotHeight: EaStyle.Sizes.fontPixelSize * 28
+
+                visible: hasBands || hasDos
+                width: parent.width
+                spacing: EaStyle.Sizes.fontPixelSize
+
+                Item {
+                    width: parent.width
+                    height: electronicTitle.height
+
+                    SectionTitle {
+                        id: electronicTitle
+                        text: electronicCard.hasBands && electronicCard.hasDos ? qsTr('Band structure and density of states') :
+                              electronicCard.hasBands ? qsTr('Band structure') : qsTr('Density of states')
+                    }
+                    MinorLabel {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: electronicCard.hasBands ? electronicCard.bands.lattice || '' : ''
+                    }
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: electronicCard.hasBands && electronicCard.hasDos ? EaStyle.Sizes.fontPixelSize : 0
+
+                    Components.BandStructurePlot {
+                        visible: electronicCard.hasBands
+                        width: electronicCard.hasDos ? (parent.width - parent.spacing) * 0.72 : parent.width
+                        height: electronicCard.plotHeight
+                        bands: electronicCard.bands
+                        energyMin: Globals.BackendWrapper.resultsEnergyWindow.min
+                        energyMax: Globals.BackendWrapper.resultsEnergyWindow.max
+                        yTitle: electronicCard.energyTitle
+                    }
+
+                    Components.DosPlot {
+                        visible: electronicCard.hasDos
+                        width: electronicCard.hasBands ? (parent.width - parent.spacing) * 0.28 : parent.width
+                        height: electronicCard.plotHeight
+                        curve: Globals.BackendWrapper.resultsDensityOfStates
+                        energyMin: Globals.BackendWrapper.resultsEnergyWindow.min
+                        energyMax: Globals.BackendWrapper.resultsEnergyWindow.max
+                        showEnergyAxis: !electronicCard.hasBands
+                        yTitle: electronicCard.energyTitle
+                    }
+                }
+
+                // Legend, for two spin channels: hue and dash name them
+                Row {
+                    visible: electronicCard.hasBands && (electronicCard.bands.levels || []).length === 2
+                    spacing: EaStyle.Sizes.fontPixelSize * 1.5
+
+                    Repeater {
+                        model: [qsTr('Spin up'), qsTr('Spin down')]
+
+                        Row {
+                            spacing: EaStyle.Sizes.fontPixelSize * 0.5
+
+                            Canvas {
+                                id: legendLine
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: EaStyle.Sizes.fontPixelSize * 2
+                                height: 4
+                                onPaint: {
+                                    const ctx = getContext('2d')
+                                    ctx.reset()
+                                    const dark = EaStyle.Colors.isDarkPalette
+                                    ctx.strokeStyle = index === 0 ? (dark ? '#2f9fd4' : '#0090cc') : (dark ? '#e86934' : '#eb6834')
+                                    ctx.lineWidth = 2
+                                    ctx.setLineDash(index === 1 ? [5, 3] : [])
+                                    ctx.beginPath(); ctx.moveTo(0, 2); ctx.lineTo(width, 2); ctx.stroke()
+                                }
+                                Connections {
+                                    target: EaStyle.Colors
+                                    function onIsDarkPaletteChanged() { legendLine.requestPaint() }
+                                }
+                            }
+                            EaElements.Label {
+                                text: modelData
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    width: parent.width
+                    height: Math.max(gapLabel.height, broadeningRow.height)
+
+                    MinorLabel {
+                        id: gapLabel
+                        anchors.left: parent.left
+                        anchors.right: broadeningRow.visible ? broadeningRow.left : parent.right
+                        anchors.rightMargin: EaStyle.Sizes.fontPixelSize
+                        anchors.verticalCenter: parent.verticalCenter
+                        wrapMode: Text.WordWrap
+                        text: {
+                            const parts = []
+                            if (Globals.BackendWrapper.resultsBandGapText) {
+                                parts.push(Globals.BackendWrapper.resultsBandGapText)
+                            }
+                            if (electronicCard.hasDos) {
+                                parts.push(qsTr('DOS from %1 k-points.').arg(Globals.BackendWrapper.resultsDosKpoints))
+                            }
+                            parts.push(electronicCard.reference === 'VBM' ? qsTr('Energies from the valence band maximum.') :
+                                       electronicCard.reference === 'E_F' ? qsTr('Energies from the Fermi energy.') : '')
+                            parts.push(electronicCard.hasBands ? qsTr('Hover the bands for the levels at a k-point.') : '')
+                            return parts.filter(part => part).join(' ')
+                        }
+                    }
+
+                    Row {
+                        id: broadeningRow
+
+                        visible: electronicCard.hasDos
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: EaStyle.Sizes.fontPixelSize * 0.5
+
+                        EaElements.Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr('Broadening (eV):')
+                        }
+                        EaElements.TextField {
+                            width: EaStyle.Sizes.fontPixelSize * 5
+                            horizontalAlignment: TextInput.AlignRight
+                            validator: DoubleValidator { bottom: 0.01; top: 1.0; decimals: 3 }
+                            text: Globals.BackendWrapper.resultsDosBroadening
+                            onEditingFinished: Globals.BackendWrapper.resultsSetDosBroadening(parseFloat(text))
+                            ToolTip.text: qsTr('Standard deviation of the Gaussian each level is drawn with, 0.01 to 1 eV.')
+                            ToolTip.visible: hovered
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -11,6 +11,7 @@ from typing import Optional
 from PySide6.QtCore import Property
 from PySide6.QtCore import QObject
 from PySide6.QtCore import Signal
+from PySide6.QtCore import Slot
 
 from .logic.results import HARTREE_TO_KCAL_PER_MOL
 from .logic.results import Results as ResultsLogic
@@ -19,6 +20,15 @@ from .logic.sample import MULTIPLICITY_NAMES
 
 # Keeps a number and its unit on one line in the narrow tiles.
 _KCAL_PER_MOL = '\u00a0kcal/\u2060mol'  # no-break space, word joiner
+
+DOS_BROADENING = 0.1  # eV, the Gaussian width the DOS is drawn with until changed
+DOS_BROADENING_LIMITS = (0.01, 1.0)
+DOS_POINTS = 600  # energies the DOS curve is drawn at
+# The window the bands and DOS are drawn in, relative to the reference energy: deep core-like
+# levels are left out below; above, it reaches the highest level computed at any k-point.
+ENERGY_BELOW = 20.0  # eV
+ENERGY_ABOVE = 10.0  # without bands or DOS
+_WINDOW_MARGIN = 0.5
 
 _NO_JOB = 'No results yet. Run the workflow on the Method page.'
 _RUNNING = 'The results appear here when the job has ended.'
@@ -38,11 +48,15 @@ def _tile(title: str, value: str, detail: str = '', tone: str = '') -> dict:
 class Results(QObject):
     resultsChanged = Signal()
 
+    dosBroadeningChanged = Signal()
+    dosChanged = Signal()  # new results or a new broadening
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._results = ResultsLogic()
         self._method_label = ''
         self._placeholder = _NO_JOB
+        self._broadening = DOS_BROADENING
 
     # Relay targets (plain Python)
 
@@ -52,6 +66,7 @@ class Results(QObject):
         self._method_label = method_label
         self._placeholder = _RUNNING
         self.resultsChanged.emit()
+        self.dosChanged.emit()
 
     def reset(self) -> None:
         """No job has run: the start-up placeholder (for PyBackend.reset)."""
@@ -59,11 +74,13 @@ class Results(QObject):
         self._method_label = ''
         self._placeholder = _NO_JOB
         self.resultsChanged.emit()
+        self.dosChanged.emit()
 
     def set_results(self, results: ResultsLogic) -> None:
         self._results = results
         self._placeholder = _NOTHING_FOUND if results.empty else ''
         self.resultsChanged.emit()
+        self.dosChanged.emit()
 
     # Overview
 
@@ -101,11 +118,14 @@ class Results(QObject):
             detail = f'HOMO {_number(results.homo, ".2f")} · LUMO {_number(results.lumo, ".2f")}'
             tiles.append(_tile('HOMO–LUMO gap (eV)', f'{results.gap:.2f}', detail))
         elif results.gap is not None:
-            # From the SCF k-points only, so a band edge between them is missed.
-            detail = f'VBM {_number(results.homo, ".2f")} · CBM {_number(results.lumo, ".2f")} · on the k-point grid'
+            # From the k-points of the job only, so a band edge between them is missed.
+            detail = f'VBM {_number(results.homo, ".2f")} · CBM {_number(results.lumo, ".2f")} · {self._sampled()}'
+            character = self._gap_character()
+            if character:
+                detail += f' · {character}'
             tiles.append(_tile('Band gap (eV)', f'{results.gap:.2f}', detail))
         elif results.fermi_energy is not None:
-            tiles.append(_tile('Fermi energy (eV)', _number(results.fermi_energy, '.2f'), 'metallic on the k-point grid'))
+            tiles.append(_tile('Fermi energy (eV)', _number(results.fermi_energy, '.2f'), f'metallic {self._sampled()}'))
         if results.dipole is not None:
             where = 'at the final geometry' if optimisation is not None else 'at the input geometry'
             tiles.append(_tile('Dipole moment (D)', f'{results.dipole:.3f}', where))
@@ -243,6 +263,133 @@ class Results(QObject):
             }
             for index, state in enumerate(excited.states)
         ]
+
+    # Band structure and density of states card
+
+    @Property(bool, notify=resultsChanged)
+    def hasBandStructure(self) -> bool:
+        return self._results.band_structure is not None
+
+    @Property(bool, notify=resultsChanged)
+    def hasDensityOfStates(self) -> bool:
+        return self._results.density_of_states is not None
+
+    @Property(str, notify=resultsChanged)
+    def energyReference(self) -> str:
+        """What the energies of the card are measured from: 'VBM', 'E_F', or '' (absolute)."""
+        results = self._results
+        return 'VBM' if results.gap is not None else 'E_F' if results.fermi_energy is not None else ''
+
+    @Property('QVariantMap', notify=resultsChanged)
+    def energyWindow(self) -> dict:
+        """{min, max} in eV from the reference: the energies both plots show."""
+        low, high = self._window()
+        return {'min': low, 'max': high}
+
+    @Property('QVariantMap', notify=resultsChanged)
+    def bandStructure(self) -> dict:
+        """{lattice, distances (Å⁻¹), starts, ticks: [{x, label}], levels}: `levels[channel][k]`
+        the bands at k-point k in eV from the reference, as many at every k-point; a branch of
+        the path runs from each start to the next."""
+        bands = self._results.band_structure
+        if bands is None:
+            return {}
+        reference = self._reference()
+        count = min(len(energies) for channel in bands.levels for energies in channel)
+        return {
+            'lattice': bands.lattice,
+            'distances': bands.distances,
+            'starts': bands.starts,
+            'ticks': [{'x': x, 'label': label} for x, label in bands.ticks],
+            'levels': [[[energy - reference for energy in energies[:count]] for energies in channel]
+                       for channel in bands.levels],
+        }
+
+    @Property(str, notify=resultsChanged)
+    def bandGapText(self) -> str:
+        """The gap along the path, for the card: 'Indirect gap 0.61 eV: VBM at Γ, CBM on Γ–X'."""
+        bands = self._results.band_structure
+        if bands is None:
+            return ''
+        edges = bands.edges()
+        if edges is None:
+            return 'Metallic along the path: bands cross the Fermi energy.' if bands.filled is None else ''
+        valence, conduction = edges
+        gap = conduction.energy - valence.energy
+        if bands.same_point(valence.k, conduction.k):
+            return f'Direct gap of {gap:.2f} eV at {_place(bands, valence.k)}.'
+        return (f'Indirect gap of {gap:.2f} eV along the path: VBM at {_place(bands, valence.k)}, '
+                f'CBM at {_place(bands, conduction.k)}.')
+
+    @Property(float, notify=dosBroadeningChanged)
+    def dosBroadening(self) -> float:
+        return self._broadening
+
+    @Slot(float)
+    def setDosBroadening(self, value: float) -> None:
+        low, high = DOS_BROADENING_LIMITS
+        value = min(max(float(value), low), high)
+        if value != self._broadening:
+            self._broadening = value
+            self.dosBroadeningChanged.emit()
+            self.dosChanged.emit()
+
+    @Property(int, notify=resultsChanged)
+    def dosKpoints(self) -> int:
+        dos = self._results.density_of_states
+        return len(dos.weights) if dos is not None else 0
+
+    @Property('QVariantMap', notify=dosChanged)
+    def densityOfStates(self) -> dict:
+        """{energies, values, max}: states per eV per cell over the energy window, from the
+        reference; recomputed when the broadening changes."""
+        dos = self._results.density_of_states
+        if dos is None:
+            return {}
+        low, high = self._window()
+        reference = self._reference()
+        step = (high - low) / (DOS_POINTS - 1)
+        energies = [low + i * step for i in range(DOS_POINTS)]
+        values = dos.curve([energy + reference for energy in energies], self._broadening)
+        return {'energies': energies, 'values': values, 'max': max(values, default=0.0)}
+
+    def _reference(self) -> float:
+        results = self._results
+        if results.gap is not None:
+            return results.homo
+        return results.fermi_energy if results.fermi_energy is not None else 0.0
+
+    def _window(self) -> tuple[float, float]:
+        """From the lowest computed level (at most ENERGY_BELOW under the reference) to the highest
+        level of the band structure at any k-point, or of the DOS grid without a band structure."""
+        results = self._results
+        levels = [part.levels for part in (results.band_structure, results.density_of_states) if part is not None]
+        if not levels:
+            return -ENERGY_BELOW, ENERGY_ABOVE
+        reference = self._reference()
+        lowest = min(min(energies) for channels in levels for channel in channels for energies in channel)
+        top = max(max(energies) for channel in levels[0] for energies in channel)
+        low = max(lowest - reference - _WINDOW_MARGIN, -ENERGY_BELOW)
+        return low, max(top - reference, low + 1.0)
+
+    def _sampled(self) -> str:
+        results = self._results
+        if results.band_structure is not None or results.density_of_states is not None:
+            return 'on the path and k-point grids'
+        return 'on the k-point grid'
+
+    def _gap_character(self) -> str:
+        """'direct' or 'indirect' along the path, when the path holds both band edges."""
+        results, bands = self._results, self._results.band_structure
+        edges = bands.edges() if bands is not None else None
+        if edges is None or (edges[0].energy, edges[1].energy) != (results.homo, results.lumo):
+            return ''
+        return 'direct' if bands.same_point(edges[0].k, edges[1].k) else 'indirect'
+
+
+def _place(bands, k: int) -> str:
+    where = bands.location(k)
+    return where if '–' not in where else f'a point on {where}'
 
 
 def _strength(value: float) -> str:

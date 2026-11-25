@@ -48,7 +48,8 @@ from the output whether the job succeeded.
 
 `logic/results.py` is the engine-agnostic results schema that an adapter's `parse()` fills
 (`engines/orca_output.py` for ORCA); `results.py` in the folder root formats it for the
-Summary page.
+Summary page. `logic/kpath.py` chooses the high-symmetry path of a band structure from the
+lattice of the cell.
 
 `logic/claude_backend.py` runs one assistant turn with the model, and `logic/assistant.py` is
 the offline assistant. `logic/speech.py` is speech without Qt:

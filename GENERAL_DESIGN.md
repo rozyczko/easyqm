@@ -130,7 +130,7 @@ Initial set:
 | Electronic properties (charges, multipoles) | ✓ | ✓ | all |
 | NMR shielding | ✓ | ✓ | ORCA, CASTEP |
 | Transition-state search | ✓ | – | ORCA |
-| Band structure / DOS | – | ✓ | CASTEP |
+| Band structure / DOS | – | ✓ | Quantum ESPRESSO, CASTEP |
 | Phonons | – | ✓ | CASTEP |
 
 Below the table, a **Resulting workflow** strip shows the order in which the ticked
@@ -189,7 +189,8 @@ Main area, left: one card per calculation with the detailed result —
 final structure into the viewer; *Frequencies*: IR (and Raman) stick spectrum or table of
 modes, with an "animate mode" that plays the normal mode in the Sample viewer;
 *Excited states*: table of transitions and a UV-Vis stick spectrum; *Bands / DOS*: band
-plot along the k-path. Charts are single-series, one hue, hover shows mode / transition
+plot along the k-path beside the DOS on the same energy axis. Charts are single-series, one hue
+(a second, dashed, for spin down), hover shows mode / transition
 details.
 
 Main area, right: the **output viewer**. Tabs: *Report* (the rendered HTML report that

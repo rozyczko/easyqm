@@ -63,6 +63,7 @@ Rectangle {
             tallRows: true
             defaultInfoText: qsTr('No calculations available')
             model: Globals.BackendWrapper.calculationsRows.length
+            maxRowCountShow: Math.max(model, 1)  // every row, without scrolling
 
             header: EaComponents.TableViewHeader {
                 EaComponents.TableViewLabel {

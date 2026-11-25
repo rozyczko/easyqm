@@ -20,6 +20,8 @@ from .logic.calculations import SINGLE_POINT_GEOMETRIES
 from .logic.calculations import Calculations as CalculationsLogic
 from .logic.calculations import CalculationType
 from .logic.calculations import info
+from .logic.kpath import band_path
+from .logic.kpath import folded_reason
 
 
 class Calculations(QObject):
@@ -28,6 +30,10 @@ class Calculations(QObject):
     optimisationChanged = Signal()
     frequenciesChanged = Signal()
     excitedStatesChanged = Signal()
+    bandStructureChanged = Signal()
+    densityOfStatesChanged = Signal()
+    # The sample's cell, whose lattice gives the band structure's path.
+    cellChanged = Signal()
     # Order or labels of the workflow steps: on selection and single point geometry changes.
     workflowChanged = Signal()
 
@@ -37,6 +43,7 @@ class Calculations(QObject):
     def __init__(self, logic: Optional[CalculationsLogic] = None, parent=None):
         super().__init__(parent)
         self._logic = logic if logic is not None else CalculationsLogic()
+        self._cell = None
 
     @property
     def logic(self) -> CalculationsLogic:
@@ -53,6 +60,8 @@ class Calculations(QObject):
             self.optimisationChanged,
             self.frequenciesChanged,
             self.excitedStatesChanged,
+            self.bandStructureChanged,
+            self.densityOfStatesChanged,
             self.workflowChanged,
             self.externalSelectionChanged,
         ):
@@ -68,6 +77,12 @@ class Calculations(QObject):
         if self._logic.selected != selected:
             self.workflowChanged.emit()
             self.externalSelectionChanged.emit()
+
+    def set_cell(self, cell) -> None:
+        """The sample's `logic.sample.Cell`, or None for a molecule (for PyBackend)."""
+        if cell != self._cell:
+            self._cell = cell
+            self.cellChanged.emit()
 
     # Table and workflow
 
@@ -291,3 +306,54 @@ class Calculations(QObject):
     @Slot(bool)
     def setExcFrozenCore(self, value: bool) -> None:
         apply(self._logic.excited_states, 'frozen_core', bool(value), self.excitedStatesChanged)
+
+    # Band structure
+
+    @Property(str, notify=cellChanged)
+    def bandsLattice(self) -> str:
+        """The lattice the path is chosen for; '' for a molecule."""
+        return band_path(self._cell).lattice if self._cell is not None else ''
+
+    @Property(str, notify=cellChanged)
+    def bandsPath(self) -> str:
+        """'Γ–X–M–Γ–R–X | M–R'; '' for a molecule."""
+        return band_path(self._cell).text if self._cell is not None else ''
+
+    @Property(str, notify=cellChanged)
+    def bandsFoldedReason(self) -> str:
+        """Why this cell's bands come folded, or ''."""
+        return folded_reason(self._cell, band_path(self._cell)) if self._cell is not None else ''
+
+    @Property(int, notify=bandStructureChanged)
+    def bandsPoints(self) -> int:
+        return self._logic.band_structure.points
+
+    @Slot(int)
+    def setBandsPoints(self, value: int) -> None:
+        apply(self._logic.band_structure, 'points', int(value), self.bandStructureChanged)
+
+    @Property(int, notify=bandStructureChanged)
+    def bandsEmptyBands(self) -> int:
+        return self._logic.band_structure.empty_bands
+
+    @Slot(int)
+    def setBandsEmptyBands(self, value: int) -> None:
+        apply(self._logic.band_structure, 'empty_bands', int(value), self.bandStructureChanged)
+
+    # Density of states
+
+    @Property(int, notify=densityOfStatesChanged)
+    def dosGridFactor(self) -> int:
+        return self._logic.density_of_states.grid_factor
+
+    @Slot(int)
+    def setDosGridFactor(self, value: int) -> None:
+        apply(self._logic.density_of_states, 'grid_factor', int(value), self.densityOfStatesChanged)
+
+    @Property(int, notify=densityOfStatesChanged)
+    def dosEmptyBands(self) -> int:
+        return self._logic.density_of_states.empty_bands
+
+    @Slot(int)
+    def setDosEmptyBands(self, value: int) -> None:
+        apply(self._logic.density_of_states, 'empty_bands', int(value), self.densityOfStatesChanged)

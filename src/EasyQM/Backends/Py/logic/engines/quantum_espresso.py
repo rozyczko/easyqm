@@ -5,8 +5,14 @@
 A single point is a pw.x `scf` run, an optimisation `relax` or `vc-relax`, whose first SCF
 is the energy at the input geometry and whose last is the one at the optimised geometry.
 Vibrational frequencies are the phonons at Γ: ph.x on the ground state pw.x left behind, then
-dynmat.x, which imposes the acoustic sum rule so that the three acoustic modes are zero. All
-three write to the one output file.
+dynmat.x, which imposes the acoustic sum rule so that the three acoustic modes are zero.
+
+A band structure and a density of states are two more pw.x runs on the ground state the
+first left behind, both with ``verbosity = 'high'`` so that every level is printed: a
+``bands`` run along the high-symmetry path of `logic.kpath`, and an ``nscf`` run with
+tetrahedra on a denser grid, whose levels the DOS is drawn from. They take the geometry from
+the saved ground state, so they follow an optimisation, and they run last because they
+overwrite that state, which ph.x reads. Every program writes to the one output file.
 
 ph.x and dynmat.x are found next to pw.x, with its prefix swapped: pw.exe gives ph.exe and
 dynmat.exe on Windows, pw.x gives ph.x and dynmat.x elsewhere.
@@ -24,11 +30,14 @@ import math
 import os
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from ..calculations import CalculationType
 from ..calculations import info
+from ..kpath import band_path
+from ..kpath import path_kpoints
 from ..method import Method
 from ..results import Results
 from . import quantum_espresso_output
@@ -59,7 +68,11 @@ DYNMAT_INPUT = """&input
   asr = 'crystal'
 /
 """
-_PROGRAMS = {PHONON_FILE_NAME: 'ph', DYNMAT_FILE_NAME: 'dynmat'}  # after pw.x
+# Band structure and density of states: two more pw.x runs on the ground state.
+BANDS_FILE_NAME = 'bands.in'
+DOS_FILE_NAME = 'dos.in'
+# The program of each input after the first; 'pw' is pw.x itself.
+_PROGRAMS = {PHONON_FILE_NAME: 'ph', DYNMAT_FILE_NAME: 'dynmat', BANDS_FILE_NAME: 'pw', DOS_FILE_NAME: 'pw'}
 
 CAPABILITIES = Capabilities(
     families=(('DFT', 'DFT'),),
@@ -91,6 +104,7 @@ _DFTD3_VERSIONS = {'D3': 3, 'D3BJ': 4}
 # zero and ph.x diverges.
 _DEGAUSS = 0.01  # Ry
 _EMPTY_BANDS = 4  # beyond the filled ones, so that fixed occupations still show the gap
+_SMEARING = ["occupations = 'smearing'", "smearing = 'cold'", f'degauss = {_DEGAUSS:g}']
 _Z_VALENCE = re.compile(r'z_valence\s*=\s*"\s*([-+.\deE]+)"|([-+.\deE]+)\s+Z valence')
 
 
@@ -105,6 +119,9 @@ class QuantumEspressoAdapter(EngineAdapter):
         CalculationType.GEOMETRY_OPTIMISATION: re.compile('BFGS Geometry Optimization'),
         CalculationType.SINGLE_POINT: re.compile('End of BFGS Geometry Optimization'),
         CalculationType.VIBRATIONAL_FREQUENCIES: re.compile('Program PHONON'),
+        # Printed by the DOS run too, after the DOS marker, which then wins.
+        CalculationType.BAND_STRUCTURE: re.compile('Band Structure Calculation'),
+        CalculationType.DENSITY_OF_STATES: quantum_espresso_output.TETRAHEDRA,
     }
     # pw.x ends normally after an SCF that did not converge, so ph.x starts and fails.
     failure_marker = re.compile(NOT_CONVERGED)
@@ -144,6 +161,44 @@ class QuantumEspressoAdapter(EngineAdapter):
     # Input and output
 
     def input_text(self, sample, calculations, method, settings) -> str:
+        steps = self._check(sample, calculations)
+        optimisation = calculations.geometry_optimisation if CalculationType.GEOMETRY_OPTIMISATION in steps else None
+        calculation, control, namelists = 'scf', [], []
+        if optimisation is not None:
+            calculation = 'vc-relax' if optimisation.optimise == 'positions_and_cell' else 'relax'
+            energy, force = _RELAX_THRESHOLDS[optimisation.convergence]
+            control = [f'etot_conv_thr = {energy:g}', f'forc_conv_thr = {force:g}', f'nstep = {optimisation.max_steps}']
+            namelists = _namelist('ions', [])
+            if calculation == 'vc-relax':
+                namelists += _namelist('cell', ["cell_dofree = 'all'"])
+        if method.occupations == 'fixed':
+            occupations = ["occupations = 'fixed'", f'nbnd = {self._filled_bands(sample, method) + _EMPTY_BANDS}']
+        else:
+            occupations = _SMEARING
+        grid = method.kpoints.for_cell(sample.cell)
+        return self._pw_input(
+            sample,
+            method,
+            ', '.join(info(step).name for step in steps),
+            _Run(calculation, control, occupations, namelists, ['K_POINTS automatic', _grid_line(grid)]),
+            # Fixed atoms break symmetries pw.x finds at the start, and it stops when they go.
+            nosym=optimisation is not None and any(atom.fixed for atom in sample.atoms),
+        )
+
+    def input_files(self, sample, calculations, method, settings) -> dict[str, str]:
+        files = {self.input_file_name: self.input_text(sample, calculations, method, settings)}
+        steps = calculations.workflow()
+        if CalculationType.VIBRATIONAL_FREQUENCIES in steps:
+            files[PHONON_FILE_NAME] = PHONON_INPUT_INSULATOR if method.occupations == 'fixed' else PHONON_INPUT
+            files[DYNMAT_FILE_NAME] = DYNMAT_INPUT
+        if CalculationType.BAND_STRUCTURE in steps:
+            files[BANDS_FILE_NAME] = self._bands_input(sample, calculations.band_structure, method)
+        if CalculationType.DENSITY_OF_STATES in steps:
+            files[DOS_FILE_NAME] = self._dos_input(sample, calculations.density_of_states, method)
+        return files
+
+    def _check(self, sample, calculations) -> list[CalculationType]:
+        """The workflow, or why there is no input for it."""
         problem = self.system_problem(sample.periodic)
         if problem:
             raise ValueError(problem)
@@ -154,38 +209,57 @@ class QuantumEspressoAdapter(EngineAdapter):
             raise ValueError(f'{self.name} does not compute Raman activities here; untick Raman.')
         if self.pseudo_folder is None:
             raise ValueError(f'No pseudopotential folder was found for {self.name}; set ESPRESSO_PSEUDO.')
+        return steps
+
+    def _bands_input(self, sample, options, method) -> str:
+        """The levels along the path; the named points are comments, for the reader."""
+        path = band_path(sample.cell)
+        vertices = path_kpoints(sample.cell, path, options.points)
+        kpoints = ['K_POINTS crystal_b', f'  {len(vertices)}']
+        kpoints += [f'  {k[0]:12.8f} {k[1]:12.8f} {k[2]:12.8f}  {count:4d}  ! {name}' for k, count, name in vertices]
+        bands = self._filled_bands(sample, method, majority=True) + options.empty_bands
+        run = _Run('bands', ["verbosity = 'high'"], [*_SMEARING, f'nbnd = {bands}'], [], kpoints)
+        return self._pw_input(sample, method, f'Band structure ({path.text})', run, diagonalise_fully=True)
+
+    def _dos_input(self, sample, options, method) -> str:
+        """The levels on a denser grid; tetrahedra give the Fermi energy of that grid."""
+        grid = [n * options.grid_factor for n in method.kpoints.for_cell(sample.cell)]
+        bands = self._filled_bands(sample, method, majority=True) + options.empty_bands
+        run = _Run('nscf', ["verbosity = 'high'"], ["occupations = 'tetrahedra'", f'nbnd = {bands}'], [],
+                   ['K_POINTS automatic', _grid_line(grid)])
+        return self._pw_input(sample, method, 'Density of states', run, diagonalise_fully=True)
+
+    def _filled_bands(self, sample, method, majority: bool = False) -> int:
+        """Bands the valence electrons fill; with `majority` and spin, those of the spin-up channel."""
+        elements = sorted({atom.element for atom in sample.atoms})
+        pseudopotentials = find_pseudopotentials(self.pseudo_folder, elements)
+        electrons = sum(_valence(self.pseudo_folder / pseudopotentials[atom.element]) for atom in sample.atoms)
+        electrons -= sample.charge
+        if majority and method.reference == 'UKS':
+            electrons += sample.multiplicity - 1
+        return math.ceil(electrons / 2)
+
+    def _pw_input(self, sample, method, steps_text: str, run: '_Run', nosym=False, diagonalise_fully=False) -> str:
+        """One pw.x input: what every run of the workflow shares, around what `run` changes."""
         elements = sorted({atom.element for atom in sample.atoms})
         pseudopotentials = find_pseudopotentials(self.pseudo_folder, elements)
         cutoff_wfc, cutoff_rho = cutoffs(self.pseudo_folder, elements)
-
-        optimisation = calculations.geometry_optimisation if CalculationType.GEOMETRY_OPTIMISATION in steps else None
-        calculation = 'scf'
-        if optimisation is not None:
-            calculation = 'vc-relax' if optimisation.optimise == 'positions_and_cell' else 'relax'
-
         control = [
-            f"calculation = '{calculation}'",
+            f"calculation = '{run.calculation}'",
             "prefix = 'job'",
             "outdir = './tmp'",
             f"pseudo_dir = '{self.pseudo_folder.as_posix()}'",
+            *run.control,
         ]
-        if optimisation is not None:
-            energy, force = _RELAX_THRESHOLDS[optimisation.convergence]
-            control += [f'etot_conv_thr = {energy:g}', f'forc_conv_thr = {force:g}', f'nstep = {optimisation.max_steps}']
         system = [
             'ibrav = 0',
             f'nat = {sample.atom_count}',
             f'ntyp = {len(elements)}',
             f'ecutwfc = {cutoff_wfc:g}',
             f'ecutrho = {cutoff_rho:g}',
+            *run.occupations,
         ]
-        if method.occupations == 'fixed':
-            electrons = sum(_valence(self.pseudo_folder / pseudopotentials[atom.element]) for atom in sample.atoms)
-            system += ["occupations = 'fixed'", f'nbnd = {math.ceil((electrons - sample.charge) / 2) + _EMPTY_BANDS}']
-        else:
-            system += ["occupations = 'smearing'", "smearing = 'cold'", f'degauss = {_DEGAUSS:g}']
-        if optimisation is not None and any(atom.fixed for atom in sample.atoms):
-            # Fixed atoms break symmetries pw.x finds at the start, and it stops when they go.
+        if nosym:
             system.append('nosym = .true.')
         if sample.charge:
             system.append(f'tot_charge = {sample.charge}')
@@ -194,14 +268,12 @@ class QuantumEspressoAdapter(EngineAdapter):
         if method.dispersion != 'none':
             system += ["vdw_corr = 'dft-d3'", f'dftd3_version = {_DFTD3_VERSIONS[method.dispersion]}']
         scf = [f'conv_thr = {_CONV_THR[method.scf_convergence]:g}', f'electron_maxstep = {method.scf_max_iterations}']
+        if diagonalise_fully:
+            scf.append('diago_full_acc = .true.')  # empty bands as accurate as the filled ones
 
-        steps_text = ', '.join(info(step).name for step in steps)
         lines = [f'! EasyQM: {sample.name or "sample"} ({sample.formula}) - {steps_text}']
         lines += _namelist('control', control) + _namelist('system', system) + _namelist('electrons', scf)
-        if optimisation is not None:
-            lines += _namelist('ions', [])
-            if calculation == 'vc-relax':
-                lines += _namelist('cell', ["cell_dofree = 'all'"])
+        lines += run.namelists
         lines.append('ATOMIC_SPECIES')
         lines += [f'  {element:<2} {_mass(element):10.4f}  {pseudopotentials[element]}' for element in elements]
         lines.append('CELL_PARAMETERS angstrom')
@@ -211,16 +283,7 @@ class QuantumEspressoAdapter(EngineAdapter):
             f'  {atom.element:<2} {atom.x:14.8f} {atom.y:14.8f} {atom.z:14.8f}' + ('  0 0 0' if atom.fixed else '')
             for atom in sample.atoms
         ]
-        grid = method.kpoints.for_cell(sample.cell)
-        lines += ['K_POINTS automatic', f'  {grid[0]} {grid[1]} {grid[2]}  0 0 0']
-        return '\n'.join(lines) + '\n'
-
-    def input_files(self, sample, calculations, method, settings) -> dict[str, str]:
-        files = {self.input_file_name: self.input_text(sample, calculations, method, settings)}
-        if CalculationType.VIBRATIONAL_FREQUENCIES in calculations.workflow():
-            files[PHONON_FILE_NAME] = PHONON_INPUT_INSULATOR if method.occupations == 'fixed' else PHONON_INPUT
-            files[DYNMAT_FILE_NAME] = DYNMAT_INPUT
-        return files
+        return '\n'.join(lines + run.kpoints) + '\n'
 
     def command(self, executable: str, input_path: Path) -> list[str]:
         return [executable, '-i', input_path.name]
@@ -228,6 +291,9 @@ class QuantumEspressoAdapter(EngineAdapter):
     def commands(self, executable: str, input_names: list[str]) -> list[list[str]]:
         commands = [self.command(executable, Path(input_names[0]))]
         for name in input_names[1:]:
+            if _PROGRAMS[name] == 'pw':
+                commands.append(self.command(executable, Path(name)))
+                continue
             program = Path(sibling(executable, _PROGRAMS[name]))
             if not program.is_file():
                 raise ValueError(f'{program.name} was not found next to {Path(executable).name} in {program.parent}.')
@@ -294,6 +360,21 @@ def _valence(path: Path) -> float:
     if match is None:
         raise ValueError(f'{path.name} states no valence charge.')
     return float(match.group(1) or match.group(2))
+
+
+@dataclass(frozen=True)
+class _Run:
+    """What one pw.x run of the workflow sets differently from the others."""
+
+    calculation: str  # 'scf', 'relax', 'vc-relax', 'bands', 'nscf'
+    control: list[str]  # &control entries after the shared ones
+    occupations: list[str]  # &system entries
+    namelists: list[str]  # &ions, &cell
+    kpoints: list[str]  # the K_POINTS card
+
+
+def _grid_line(grid) -> str:
+    return f'  {grid[0]} {grid[1]} {grid[2]}  0 0 0'
 
 
 def _namelist(name: str, entries: list[str]) -> list[str]:

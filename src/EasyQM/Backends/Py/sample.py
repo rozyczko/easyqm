@@ -31,6 +31,7 @@ _COORDINATE_DECIMALS = 4
 _ANGLE_DECIMALS = 2
 _SELECTION_LABELS_SHOWN = 4
 REPEAT_MAX = 4
+SUPERCELL_MAX = 8  # cells along one of a, b, c; the atom count is limited as well
 _CELL_PARAMETERS = ('a', 'b', 'c', 'alpha', 'beta', 'gamma')
 _UNCHANGED = 1e-9  # a typed value this close to the current one is no edit
 _NEW_ATOM_ELEMENT = 'C'
@@ -208,6 +209,11 @@ class Sample(QObject):
     @Property(int, constant=True)
     def sceneAtomLimit(self) -> int:
         return SCENE_ATOM_LIMIT
+
+    @Property(int, constant=True)
+    def supercellMax(self) -> int:
+        """The most cells a supercell holds along one of a, b, c."""
+        return SUPERCELL_MAX
 
     # Selection
 
@@ -420,6 +426,31 @@ class Sample(QObject):
         fractional coordinates. :raises ValueError: for a molecule or values that make no cell."""
         self._logic.set_cell_parameters(**parameters)
         self._structure_changed()
+
+    @Slot(int, int, int)
+    def makeSupercell(self, na: int, nb: int, nc: int) -> None:
+        """Replace a crystal's cell by na × nb × nc of them; a refused supercell changes nothing."""
+        with contextlib.suppress(ValueError):
+            self.make_supercell(na, nb, nc)
+
+    def make_supercell(self, na: int, nb: int, nc: int) -> None:
+        """As `logic.Sample.make_supercell`: the structure becomes the supercell, drawn as one
+        cell, with no selection (the atoms are numbered anew).
+
+        :raises ValueError: for a molecule, counts outside 1 to SUPERCELL_MAX, or a supercell
+            of more than SCENE_ATOM_LIMIT atoms; nothing changes then.
+        """
+        counts = (int(na), int(nb), int(nc))
+        if not all(1 <= count <= SUPERCELL_MAX for count in counts):
+            raise ValueError(f'A supercell holds 1 to {SUPERCELL_MAX} cells along each of a, b, c.')
+        if self._logic.atom_count * math.prod(counts) > SCENE_ATOM_LIMIT:
+            raise ValueError(f'This supercell would hold more than {SCENE_ATOM_LIMIT} atoms.')
+        if not self._logic.periodic or counts != (1, 1, 1):
+            self._logic.make_supercell(*counts)  # raises for a molecule
+            self._selected, self._anchor = [], None
+            self._repeat = (1, 1, 1)
+            self.viewChanged.emit()
+            self._structure_changed()
 
     @Slot(int, str, str)
     def setZmatrixValue(self, atom: int, field: str, text: str) -> None:

@@ -377,6 +377,49 @@ def test_set_cell_parameters_refuses_what_makes_no_cell(nacl_cif, parameters, me
         Sample.benzene().set_cell_parameters(5, 5, 5, 90, 90, 90)
 
 
+def test_make_supercell_repeats_the_cell_and_its_atoms(nacl_cif):
+    sample = Sample()
+    sample.load(nacl_cif)
+    sample.atoms[1].fixed = True
+    sample.charge = 1
+    sample.multiplicity = 2
+    cell = sample.cell
+    before = [(atom.element, cell.fractional(atom.x, atom.y, atom.z)) for atom in sample.atoms]
+
+    sample.make_supercell(2, 1, 3)
+
+    assert sample.atom_count == 48 and sample.formula == 'ClNa' and sample.formula_units == 24
+    assert sample.cell.lengths == pytest.approx((2 * 5.6402, 5.6402, 3 * 5.6402))
+    assert sample.cell.angles == pytest.approx((90, 90, 90)) and sample.cell.space_group == ''
+    assert sample.cell.volume == pytest.approx(6 * cell.volume)
+    assert [atom.label for atom in sample.atoms] == [f'{atom.element}{n}' for n, atom in enumerate(sample.atoms, 1)]
+    # The first cell holds the original atoms where they were; c runs fastest after it.
+    for index, (element, (fa, fb, fc)) in enumerate(before):
+        for image, shift in ((0, (0, 0, 0)), (1, (0, 0, 1)), (3, (1, 0, 0))):
+            atom = sample.atoms[8 * image + index]
+            expected = ((fa + shift[0]) / 2, fb, (fc + shift[2]) / 3)
+            assert atom.element == element
+            assert sample.cell.fractional(atom.x, atom.y, atom.z) == pytest.approx(expected, abs=1e-9)
+    positions = {tuple(round(value, 6) for value in (atom.x, atom.y, atom.z)) for atom in sample.atoms}
+    assert len(positions) == 48
+    assert [index for index, atom in enumerate(sample.atoms) if atom.fixed] == [1 + 8 * image for image in range(6)]
+    assert sample.charge == 6 and sample.multiplicity == 1  # an even electron count now
+
+
+def test_make_supercell_refuses_a_molecule_and_bad_counts(nacl_cif):
+    sample = Sample()
+    sample.load(nacl_cif)
+
+    for counts in ((0, 1, 1), (1, -2, 1), (1, 1, 1.5)):
+        with pytest.raises(ValueError, match='at least one cell'):
+            sample.make_supercell(*counts)
+    sample.make_supercell(1, 1, 1)  # the cell itself: nothing to do
+    assert sample.atom_count == 8 and sample.cell.space_group == 'Fm-3m'
+
+    with pytest.raises(ValueError, match='no unit cell'):
+        Sample.benzene().make_supercell(2, 2, 2)
+
+
 def test_crystal_formula_and_summary(nacl_cif):
     sample = Sample()
     sample.load(nacl_cif)

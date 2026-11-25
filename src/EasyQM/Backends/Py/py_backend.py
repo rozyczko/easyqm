@@ -117,6 +117,8 @@ class PyBackend(QObject):
             self._calculations.optimisationChanged,
             self._calculations.frequenciesChanged,
             self._calculations.excitedStatesChanged,
+            self._calculations.bandStructureChanged,
+            self._calculations.densityOfStatesChanged,
             self._method.levelOfTheoryChanged,
             self._method.systemChanged,
             self._method.scfChanged,
@@ -163,6 +165,7 @@ class PyBackend(QObject):
         self._project.setSampleName(f'{self._sample.formula}, {self._sample.atomCount} atoms')
         self._method.set_sample_cell(self._sample.logic.cell)
         self._calculations.set_periodic(self._sample.periodic)
+        self._calculations.set_cell(self._sample.logic.cell)
 
     def _relay_calculations(self) -> None:
         self._project.setCalculations(self._calculations.selectedNames)

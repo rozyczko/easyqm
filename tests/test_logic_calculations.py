@@ -65,3 +65,22 @@ def test_excited_states_are_for_molecules_only():
 
     calculations.reset()  # the sample stays a crystal
     assert calculations.periodic and calculations.excited_states.states == 5
+
+
+def test_band_structure_and_dos_are_for_crystals_and_run_last():
+    calculations = Calculations()
+    calculations.set_selected(CalculationType.BAND_STRUCTURE, True)
+    assert calculations.unavailable(CalculationType.BAND_STRUCTURE) == 'Periodic systems only'
+    assert calculations.workflow() == []
+
+    calculations.set_periodic(True)
+    for calculation in CalculationType:
+        calculations.set_selected(calculation, True)
+    assert calculations.workflow() == [
+        CalculationType.GEOMETRY_OPTIMISATION,
+        CalculationType.SINGLE_POINT,
+        CalculationType.VIBRATIONAL_FREQUENCIES,
+        CalculationType.BAND_STRUCTURE,
+        CalculationType.DENSITY_OF_STATES,
+    ]
+    assert (calculations.band_structure.points, calculations.density_of_states.grid_factor) == (100, 2)

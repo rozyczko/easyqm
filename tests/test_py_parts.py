@@ -21,6 +21,8 @@ from Backends.Py.logic.engines.orca import OrcaAdapter
 from Backends.Py.logic.method import Method as MethodLogic
 from Backends.Py.logic.method import RunSettings
 from Backends.Py.logic.project import Project as ProjectLogic
+from Backends.Py.logic.results import BandStructure
+from Backends.Py.logic.results import DensityOfStates
 from Backends.Py.logic.results import Excitation
 from Backends.Py.logic.results import ExcitedStates
 from Backends.Py.logic.results import Results as ResultsLogic
@@ -443,6 +445,35 @@ def test_sample_edits_no_cell_of_a_molecule(qcore_application):
     assert sample.atoms[0]['x'] == 0.5 and sample.cell == {} and len(changes) == 1
 
 
+def test_sample_makes_a_supercell(qcore_application, nacl_cif):
+    sample = Sample()
+    sample.loadStructure(str(nacl_cif))
+    sample.setViewRepeat(2, 2, 1)
+    sample.selectAtom(3, 'only')
+    loads = _emissions(sample.structureLoaded)
+    changes = [_emissions(signal) for signal in (sample.sampleChanged, sample.sceneChanged, sample.externalSampleChanged)]
+
+    sample.makeSupercell(2, 2, 2)
+
+    assert sample.atomCount == 64 and sample.cell['a'] == 11.2804 and sample.cell['spaceGroup'] == ''
+    assert sample.summary == 'NaCl.cif · ClNa · Z = 32 · 64 atoms'
+    assert sample.viewRepeat == [1, 1, 1] and sample.selectedAtoms == []
+    assert len({atom['atom'] for atom in sample.sceneAtoms}) == 64
+    assert all(len(emitted) == 1 for emitted in changes) and not loads
+
+    # One cell, counts out of range, and more atoms than the viewer draws change nothing.
+    for counts in ((1, 1, 1), (0, 1, 1), (sample.supercellMax + 1, 1, 1), (4, 4, 2)):
+        sample.makeSupercell(*counts)
+    assert sample.atomCount == 64 and all(len(emitted) == 1 for emitted in changes)
+    with pytest.raises(ValueError, match='more than 2000 atoms'):
+        sample.make_supercell(4, 4, 2)
+
+    molecule = Sample()
+    changes = _emissions(molecule.sampleChanged)
+    molecule.makeSupercell(2, 2, 2)
+    assert molecule.atomCount == 12 and not changes
+
+
 def test_sample_moves_an_atom_to_a_cartesian_position(qcore_application):
     sample = Sample()
     sample.setCoordinates('zmatrix')
@@ -529,8 +560,12 @@ def test_calculations_rows_and_workflow(qcore_application):
         'Geometry optimisation',
         'Vibrational frequencies',
         'Excited states',
+        'Band structure',
+        'Density of states',
     ]
-    assert all(row['enabled'] and not row['reason'] for row in calculations.rows)
+    # A molecule at start-up: the crystal-only rows are greyed.
+    assert all(row['enabled'] and not row['reason'] for row in calculations.rows[:4])
+    assert [row['reason'] for row in calculations.rows[4:]] == ['Periodic systems only'] * 2
     assert calculations.selectedCount == 0 and calculations.workflow == []
 
     calculations.setSelected('single_point', True)
@@ -600,6 +635,34 @@ def test_calculations_options(qcore_application):
     assert calculations.freqTemperature == 300.0 and calculations.freqRaman
     assert calculations.singlePointGeometry == 'input'
     assert calculations.optConvergenceChoices[2] == {'value': 'tight', 'label': 'Tight'}
+
+
+def test_band_structure_and_dos_options_and_path(qcore_application, nacl_cif):
+    calculations = Calculations()
+    bands = _emissions(calculations.bandStructureChanged)
+    dos = _emissions(calculations.densityOfStatesChanged)
+    cells = _emissions(calculations.cellChanged)
+
+    calculations.setBandsPoints(150)
+    calculations.setBandsPoints(150)
+    calculations.setBandsEmptyBands(4)
+    calculations.setDosGridFactor(3)
+    calculations.setDosEmptyBands(0)
+    assert len(bands) == 2 and len(dos) == 2
+    assert (calculations.bandsPoints, calculations.bandsEmptyBands) == (150, 4)
+    assert (calculations.dosGridFactor, calculations.dosEmptyBands) == (3, 0)
+    assert calculations.bandsPath == '' and calculations.bandsLattice == ''  # no cell yet
+
+    crystal = Sample()
+    crystal.loadStructure(str(nacl_cif))
+    calculations.set_cell(crystal.logic.cell)
+    calculations.set_cell(crystal.logic.cell)
+    assert len(cells) == 1
+    assert calculations.bandsLattice == 'Simple cubic' and calculations.bandsPath == 'Γ–X–M–Γ–R–X | M–R'
+    assert 'Fm-3m' in calculations.bandsFoldedReason  # the conventional cell of rock salt
+
+    calculations.reset()
+    assert calculations.bandsPoints == 100 and calculations.dosGridFactor == 2
 
 
 # Method
@@ -936,6 +999,61 @@ def test_results_of_a_crystal_show_the_band_gap_or_the_fermi_energy(qcore_applic
         'detail': 'metallic on the k-point grid',
         'tone': '',
     }
+
+
+def _bands(levels, filled=(2,)) -> BandStructure:
+    """Four k-points: Γ, a point on Γ–X, X, then a jump to M."""
+    kpoints = [(0, 0, 0), (0, 0.25, 0), (0, 0.5, 0), (0.5, 0.5, 0)]
+    return BandStructure([0.0, 0.3, 0.6, 0.6], levels, [(0.0, 'Γ'), (0.6, 'X|M')], [0, 3],
+                         list(filled) if filled else None, 'Simple cubic', kpoints)
+
+
+def test_results_band_structure_relative_to_the_valence_band_maximum(qcore_application):
+    results = Results()
+    # Two filled bands; VBM 1.0 at Γ, CBM 2.0 at X: an indirect gap.
+    levels = [[[-5.0, 1.0, 3.0], [-4.0, 0.5, 2.5], [-3.0, 0.2, 2.0], [-3.0, 0.1, 2.2]]]
+    dos = DensityOfStates([[[0.0, 1.0, 2.0]]], [2.0], fermi_energy=1.5, filled=[2])
+    results.set_results(ResultsLogic(homo=1.0, lumo=2.0, crystal=True, band_structure=_bands(levels),
+                                     density_of_states=dos))
+
+    assert results.hasBandStructure and results.hasDensityOfStates and results.energyReference == 'VBM'
+    bands = results.bandStructure
+    assert bands['levels'][0][0] == [-6.0, 0.0, 2.0] and bands['starts'] == [0, 3]
+    assert bands['ticks'] == [{'x': 0.0, 'label': 'Γ'}, {'x': 0.6, 'label': 'X|M'}]
+    assert results.bandGapText == 'Indirect gap of 1.00 eV along the path: VBM at Γ, CBM at X.'
+    assert results.tiles[0]['detail'] == 'VBM 1.00 · CBM 2.00 · on the path and k-point grids · indirect'
+    # From the lowest level less a margin to the highest band's top along the path: 3.0 at Γ.
+    assert results.energyWindow == {'min': pytest.approx(-6.5), 'max': pytest.approx(2.0)}
+
+    curve = results.densityOfStates
+    assert len(curve['energies']) == 600 and curve['energies'][0] == pytest.approx(-6.5)
+    peak = max(range(600), key=lambda i: curve['values'][i] if curve['energies'][i] < -0.5 else 0)
+    assert curve['energies'][peak] == pytest.approx(-1.0, abs=0.02)  # the level at 0 eV, 1 eV below the VBM
+    assert curve['max'] == pytest.approx(2.0 / (0.1 * math.sqrt(2 * math.pi)), rel=1e-2)
+
+    # Without a band structure, the DOS grid's highest level; no cap above.
+    high = DensityOfStates([[[0.0, 1.0, 15.0]]], [2.0], filled=[2])
+    results.set_results(ResultsLogic(homo=1.0, lumo=2.0, crystal=True, density_of_states=high))
+    assert results.energyWindow == {'min': pytest.approx(-1.5), 'max': pytest.approx(14.0)}
+
+
+def test_results_direct_gap_metal_and_broadening(qcore_application):
+    results = Results()
+    direct = [[[-1.0, 0.0, 2.0], [-1.0, 1.0, 1.5], [-1.0, 0.0, 2.0], [-1.0, 0.0, 2.0]]]
+    results.set_results(ResultsLogic(homo=1.0, lumo=1.5, crystal=True, band_structure=_bands(direct)))
+    assert results.bandGapText == 'Direct gap of 0.50 eV at a point on Γ–X.'
+
+    metal = ResultsLogic(fermi_energy=0.3, crystal=True, band_structure=_bands(direct, filled=None))
+    results.set_results(metal)
+    assert results.energyReference == 'E_F' and results.bandGapText.startswith('Metallic along the path')
+    assert results.tiles[0]['detail'] == 'metallic on the path and k-point grids'
+
+    changes = _emissions(results.dosChanged)
+    results.setDosBroadening(0.25)
+    results.setDosBroadening(0.25)
+    results.setDosBroadening(5.0)  # clamped to the largest
+    assert results.dosBroadening == 1.0 and len(changes) == 2
+    assert results.densityOfStates == {} and not results.hasDensityOfStates
 
 
 def test_results_of_an_optimisation_with_frequencies(qcore_application):

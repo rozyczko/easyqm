@@ -170,6 +170,14 @@ OPTION_FIELDS = {
         Field('virtual_orbitals', 'excVirtualOrbitals', 'setExcVirtualOrbitals', 'int', limits=(0, 1000)),
         Field('frozen_core', 'excFrozenCore', 'setExcFrozenCore', 'bool'),
     ),
+    'band_structure': (
+        Field('points', 'bandsPoints', 'setBandsPoints', 'int', limits=(10, 1000)),
+        Field('empty_bands', 'bandsEmptyBands', 'setBandsEmptyBands', 'int', limits=(0, 200)),
+    ),
+    'density_of_states': (
+        Field('grid_factor', 'dosGridFactor', 'setDosGridFactor', 'int', limits=(1, 8)),
+        Field('empty_bands', 'dosEmptyBands', 'setDosEmptyBands', 'int', limits=(0, 200)),
+    ),
 }
 
 
@@ -273,7 +281,9 @@ TOOLS = [
     _tool('set_calculation_options', 'Change options of the calculations. Only the fields given change, and only if '
           'all of them are valid. excited_states: method tddft (TD-DFT; CIS or TD-HF with the HF family) or '
           'eom_ccsd; tda, triplets and the orbital counts apply to tddft, frozen_core to eom_ccsd. occupied_orbitals '
-          'and virtual_orbitals are the highest occupied and lowest virtual orbitals used, 0 for the engine\'s choice.',
+          'and virtual_orbitals are the highest occupied and lowest virtual orbitals used, 0 for the engine\'s choice. '
+          'band_structure: points along the whole high-symmetry path, and empty_bands computed above the filled '
+          'ones. density_of_states: grid_factor multiplies the SCF k-point grid along each axis.',
           {group: _object(fields) for group, fields in OPTION_FIELDS.items()}, strict=False),
     _tool('set_method', 'Change the level of theory, SCF and run settings of the active engine. Only fields shown in '
           'the workspace `method` state apply to it. Only the fields given change, and only if all of them are valid. '
@@ -309,7 +319,8 @@ class Workspace:
             'sample': (sample.sampleChanged, sample.atomsChanged, sample.electronicStateChanged),
             'calculations': (calculations.selectionChanged, calculations.singlePointChanged,
                              calculations.optimisationChanged, calculations.frequenciesChanged,
-                             calculations.excitedStatesChanged),
+                             calculations.excitedStatesChanged, calculations.bandStructureChanged,
+                             calculations.densityOfStatesChanged),
             'method': (method.engineChanged, method.levelOfTheoryChanged, method.systemChanged, method.scfChanged,
                        method.runSettingsChanged, method.kpointsChanged),
         }
@@ -367,6 +378,9 @@ class Workspace:
                                 if (reason := self._calculations.logic.unavailable(t))},
                 'workflow': [step['label'] for step in self._calculations.workflow],
                 'options': {group: _state(self._calculations, fields) for group, fields in OPTION_FIELDS.items()},
+                **({'band_path': {'lattice': self._calculations.bandsLattice, 'path': self._calculations.bandsPath,
+                                  'folded': self._calculations.bandsFoldedReason or None}}
+                   if sample.periodic else {}),
             },
             'method': {
                 'engine': {'name': method.engineName, 'found': method.engineFound, 'version': method.engineVersion,
@@ -439,6 +453,12 @@ class Workspace:
                                           'wavelength_nm': e['wavelengthText'], 'f': e['strengthText']}
                                          for e in excitations[:MODES_SHOWN]],
                                'total': len(excitations)} if excitations else None,
+            'band_structure': {'lattice': results.bandStructure['lattice'],
+                               'path': [tick['label'] for tick in results.bandStructure['ticks']],
+                               'spin_channels': len(results.bandStructure['levels']),
+                               'gap': results.bandGapText} if results.hasBandStructure else None,
+            'density_of_states': {'kpoints': results.dosKpoints, 'energies_from': results.energyReference or 'absolute'}
+            if results.hasDensityOfStates else None,
         }
 
     def _configuration(self) -> dict:
