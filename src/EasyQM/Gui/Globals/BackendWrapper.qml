@@ -60,8 +60,14 @@ QtObject {
     readonly property string sampleSummary: activeBackend.sample.summary
     readonly property int sampleAtomCount: activeBackend.sample.atomCount
     readonly property bool samplePeriodic: activeBackend.sample.periodic
-    // {a, b, c, alpha, beta, gamma, volume, spaceGroup, vectors}; empty for a molecule
+    // {a, b, c, alpha, beta, gamma, volume, spaceGroup, spaceGroupNumber, fileSpaceGroup,
+    // vectors}; empty for a molecule. spaceGroup is found from the atoms (spglib),
+    // fileSpaceGroup is the one the file gives, until the first edit
     readonly property var sampleCell: activeBackend.sample.cell
+    // Why the file's space group differs from the atoms'; '' when they agree
+    readonly property string sampleSpaceGroupWarning: activeBackend.sample.spaceGroupWarning
+    // Å, within which spglib takes atoms to be on symmetric positions
+    readonly property real sampleSpaceGroupTolerance: activeBackend.sample.spaceGroupTolerance
     // Schoenflies symbol of a molecule; empty for a crystal or above samplePointGroupAtomLimit atoms
     readonly property string samplePointGroup: activeBackend.sample.pointGroup
     readonly property int samplePointGroupAtomLimit: activeBackend.sample.pointGroupAtomLimit

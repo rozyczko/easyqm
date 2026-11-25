@@ -23,6 +23,7 @@ from .logic.scene import Scene
 from .logic.scene import build_scene
 from .logic.scene import place
 from .logic.symmetry import ATOM_LIMIT as POINT_GROUP_ATOM_LIMIT
+from .logic.symmetry import SPACE_GROUP_TOLERANCE
 from .logic.symmetry import point_group
 from .logic.zmatrix import FIELDS as ZMATRIX_FIELDS
 from .logic.zmatrix import ZMatrix
@@ -35,6 +36,7 @@ SUPERCELL_MAX = 8  # cells along one of a, b, c; the atom count is limited as we
 _CELL_PARAMETERS = ('a', 'b', 'c', 'alpha', 'beta', 'gamma')
 _UNCHANGED = 1e-9  # a typed value this close to the current one is no edit
 _NEW_ATOM_ELEMENT = 'C'
+_UNKNOWN = object()  # not determined yet
 # Above this the viewer, one 3D model per atom, gets slow (PERIODIC-DESIGN.md, section 4).
 SCENE_ATOM_LIMIT = 2000
 
@@ -74,6 +76,7 @@ class Sample(QObject):
         self._coordinates = self._default_coordinates()
         self._scene: Optional[Scene] = None  # built on first read
         self._point_group: Optional[str] = None  # found on first read
+        self._space_group = _UNKNOWN  # a crystal's, found on first read; None if none is found
         # Built on first read in 'zmatrix' mode; the construction (which atoms place which)
         # is kept from one Z-matrix to the next, so rows do not reorder while atoms move.
         self._zmatrix: Optional[ZMatrix] = None
@@ -105,7 +108,8 @@ class Sample(QObject):
 
     @Property(str, notify=sampleChanged)
     def summary(self) -> str:
-        return self._logic.summary
+        group = self._current_space_group()
+        return self._logic.summary_with(group.symbol if group else '')
 
     @Property(int, notify=sampleChanged)
     def atomCount(self) -> int:
@@ -117,14 +121,20 @@ class Sample(QObject):
 
     @Property('QVariantMap', notify=sampleChanged)
     def cell(self) -> dict:
-        """{a, b, c, alpha, beta, gamma, volume, spaceGroup, vectors}; empty for a molecule."""
+        """{a, b, c, alpha, beta, gamma, volume, spaceGroup, spaceGroupNumber, fileSpaceGroup,
+        vectors}; empty for a molecule. `spaceGroup` and its number are those spglib finds for
+        the atoms ('' and 0 when it finds none); `fileSpaceGroup` is what the file gives, until
+        the first edit."""
         cell = self._logic.cell
         if cell is None:
             return {}
         values = dict(zip(('a', 'b', 'c', 'alpha', 'beta', 'gamma'), (*cell.lengths, *cell.angles)))
         values['volume'] = cell.volume
         values = {key: round(value, _COORDINATE_DECIMALS) for key, value in values.items()}
-        values['spaceGroup'] = cell.space_group
+        group = self._current_space_group()
+        values['spaceGroup'] = group.symbol if group else ''
+        values['spaceGroupNumber'] = group.number if group else 0
+        values['fileSpaceGroup'] = cell.space_group
         values['vectors'] = [_rounded(vector) for vector in cell.vectors]
         return values
 
@@ -140,6 +150,17 @@ class Sample(QObject):
     @Property(int, constant=True)
     def pointGroupAtomLimit(self) -> int:
         return POINT_GROUP_ATOM_LIMIT
+
+    @Property(str, notify=sampleChanged)
+    def spaceGroupWarning(self) -> str:
+        """Why the space group the file gives is not that of the atoms; '' when they agree, for
+        a molecule, and once the structure was edited (the file's group is then dropped)."""
+        return self._logic.space_group_warning(self._current_space_group())
+
+    @Property(float, constant=True)
+    def spaceGroupTolerance(self) -> float:
+        """Å: how far atoms may be from a symmetric position and still count as on it."""
+        return SPACE_GROUP_TOLERANCE
 
     @Property(int, notify=electronicStateChanged)
     def charge(self) -> int:
@@ -529,6 +550,7 @@ class Sample(QObject):
         selection keeps its atoms, so measurements follow them."""
         self._scene = None
         self._point_group = None
+        self._space_group = _UNKNOWN
         self._zmatrix_stale = True
         self.sampleChanged.emit()
         self.atomsChanged.emit()
@@ -661,6 +683,11 @@ class Sample(QObject):
             self._coordinates = value
             self.viewChanged.emit()
             self.zmatrixChanged.emit()
+
+    def _current_space_group(self):
+        if self._space_group is _UNKNOWN:
+            self._space_group = self._logic.space_group()
+        return self._space_group
 
     # Scene
 

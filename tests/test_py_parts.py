@@ -229,8 +229,10 @@ def test_sample_loads_a_crystal(qcore_application, nacl_cif):
     assert loads and sample.periodic and sample.summary == 'NaCl.cif · ClNa · Z = 4 · 8 atoms · Fm-3m'
     assert sample.cell == {
         'a': 5.6402, 'b': 5.6402, 'c': 5.6402, 'alpha': 90.0, 'beta': 90.0, 'gamma': 90.0, 'volume': 179.4252,
-        'spaceGroup': 'Fm-3m', 'vectors': [[5.6402, 0.0, 0.0], [0.0, 5.6402, 0.0], [0.0, 0.0, 5.6402]],
+        'spaceGroup': 'Fm-3m', 'spaceGroupNumber': 225, 'fileSpaceGroup': 'Fm-3m',
+        'vectors': [[5.6402, 0.0, 0.0], [0.0, 5.6402, 0.0], [0.0, 0.0, 5.6402]],
     }  # fmt: skip
+    assert sample.spaceGroupWarning == ''
     assert sample.atoms[5]['label'] == 'Cl6' and (sample.atoms[5]['fx'], sample.atoms[5]['fy']) == (0.5, 0.0)
     assert sample.coordinates == 'fractional' and sample.viewRepeat == [1, 1, 1]
     assert sample.selectedAtoms == [] and len(sample.sceneAtoms) == 27 and len(sample.cellEdges) == 12
@@ -328,7 +330,9 @@ def test_sample_edits_fractional_coordinates_and_the_cell(qcore_application, nac
     sample.setAtomCoordinate(0, 0, '1.25')  # fractional, as the tables show a crystal
 
     assert sample.atoms[0]['fx'] == 0.25 and sample.atoms[0]['x'] == 1.4101
-    assert sample.cell['spaceGroup'] == '' and sample.summary == 'NaCl.cif · ClNa · Z = 4 · 8 atoms'
+    # The file's group is dropped; the atoms' is found again, lower now: one Na moved.
+    assert sample.cell['fileSpaceGroup'] == '' and sample.cell['spaceGroup'] == 'P4mm'
+    assert sample.summary == 'NaCl.cif · ClNa · Z = 4 · 8 atoms · P4mm' and sample.spaceGroupWarning == ''
 
     sample.setCoordinates('cartesian')
     sample.setAtomCoordinate(0, 0, '2.82010')
@@ -455,8 +459,10 @@ def test_sample_makes_a_supercell(qcore_application, nacl_cif):
 
     sample.makeSupercell(2, 2, 2)
 
-    assert sample.atomCount == 64 and sample.cell['a'] == 11.2804 and sample.cell['spaceGroup'] == ''
-    assert sample.summary == 'NaCl.cif · ClNa · Z = 32 · 64 atoms'
+    assert sample.atomCount == 64 and sample.cell['a'] == 11.2804 and sample.cell['fileSpaceGroup'] == ''
+    # The supercell keeps the symmetry of the atoms: spglib finds the group of the parent cell.
+    assert sample.cell['spaceGroup'] == 'Fm-3m' and sample.cell['spaceGroupNumber'] == 225
+    assert sample.summary == 'NaCl.cif · ClNa · Z = 32 · 64 atoms · Fm-3m'
     assert sample.viewRepeat == [1, 1, 1] and sample.selectedAtoms == []
     assert len({atom['atom'] for atom in sample.sceneAtoms}) == 64
     assert all(len(emitted) == 1 for emitted in changes) and not loads
@@ -509,7 +515,7 @@ def test_sample_adds_an_atom_at_the_origin_and_selects_it(qcore_application, nac
     sample.loadStructure(str(nacl_cif))
     sample.addAtom()
     new = sample.atoms[8]
-    assert (new['fx'], new['fy'], new['fz']) == (0.0, 0.0, 0.0) and sample.cell['spaceGroup'] == ''
+    assert (new['fx'], new['fy'], new['fz']) == (0.0, 0.0, 0.0) and sample.cell['fileSpaceGroup'] == ''
 
 
 def test_sample_removes_the_selected_atoms(qcore_application):

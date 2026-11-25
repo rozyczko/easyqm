@@ -93,7 +93,7 @@ Column {
         wrapMode: Text.WordWrap
         color: EaStyle.Colors.themeForegroundMinor
         text: group.periodic ?
-                  qsTr('The cell and its atoms are replaced; the space group is cleared.') :
+                  qsTr('The cell and its atoms are replaced; the space group is found again from them.') :
                   qsTr('A molecule has no cell to repeat.')
     }
 }

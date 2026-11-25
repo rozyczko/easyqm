@@ -7,7 +7,8 @@ import Gui.Components as Components
 import Gui.Globals as Globals
 
 
-// Cell parameters of a crystal: lengths and angles editable, volume and space group derived.
+// Cell parameters of a crystal: lengths and angles editable, volume and space group derived
+// (the space group from the atoms, with a warning while the file gives another).
 // Empty and disabled for a molecule, and disabled while a job runs (the job was set up for
 // the current cell, and a variable-cell optimisation changes it when it converges).
 Column {
@@ -94,8 +95,10 @@ Column {
             width: parent.width
             readOnly: true
             horizontalAlignment: TextInput.AlignLeft
-            // An edited structure need not have the symmetry of its file.
-            text: periodic ? cell.spaceGroup || qsTr('unknown') : ''
+            // Found from the atoms (spglib), so it follows every edit.
+            text: periodic ? (cell.spaceGroup ? `${cell.spaceGroup} (${cell.spaceGroupNumber})` : qsTr('unknown')) : ''
         }
     }
+
+    Components.SpaceGroupWarning {}
 }
