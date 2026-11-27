@@ -65,13 +65,27 @@ K_POINTS automatic
 """
 
 
+UPF_PBE = '<PP_HEADER element="X" functional="PBE" z_valence="1.0"/>\n'
+
+
+def _library(folder: Path, header: str, *names: str) -> Path:
+    """A pseudopotential library for NaCl in `folder`, its UPF files starting with `header`."""
+    folder.mkdir()
+    for name in names or ('Na.upf', 'Cl.upf'):
+        (folder / name).write_text(header, encoding='utf-8')
+    cutoffs = {'Na': {'cutoff_wfc': 45, 'cutoff_rho': 360}, 'Cl': {'cutoff_wfc': 35, 'cutoff_rho': 210}}
+    (folder / 'cutoffs.json').write_text(json.dumps(cutoffs), encoding='utf-8')
+    return folder
+
+
 @pytest.fixture
 def pseudo(tmp_path) -> Path:
-    """A pseudopotential folder for NaCl, with both naming styles and a file that is no UPF."""
+    """A PBE pseudopotential folder for NaCl, with both naming styles and a file that is no UPF."""
     folder = tmp_path / 'pseudo'
     folder.mkdir()
-    for name in ('Na.paw.pbe.upf', 'cl_pbe_v1.uspp.F.UPF', 'notes.txt'):
-        (folder / name).write_text('', encoding='utf-8')
+    for name in ('Na.paw.pbe.upf', 'cl_pbe_v1.uspp.F.UPF'):
+        (folder / name).write_text(UPF_PBE, encoding='utf-8')
+    (folder / 'notes.txt').write_text('', encoding='utf-8')
     cutoffs = {'Na': {'cutoff_wfc': 40, 'cutoff_rho': 320}, 'Cl': {'cutoff_wfc': 35, 'cutoff_rho': 210}}
     (folder / 'cutoffs.json').write_text(json.dumps(cutoffs), encoding='utf-8')
     return folder
@@ -112,7 +126,12 @@ def test_found_with_version_and_the_pseudo_folder_beside_bin(tmp_path, monkeypat
 
     assert info.found and info.version == '7.5' and info.path == str(executable)
     assert adapter.pseudo_folder == tmp_path / 'QE' / 'pseudo'
-    assert info.detail == f'pseudopotentials in {tmp_path / "QE" / "pseudo"}'
+    assert info.detail == f'pseudopotentials in {tmp_path / "QE" / "pseudo"} (no UPF files)'
+
+    _library(tmp_path / 'QE' / 'pseudo' / 'pbesol', '<PP_HEADER functional="PBESOL"/>')
+    assert adapter.detect().detail == f'pseudopotentials in {tmp_path / "QE" / "pseudo"} (PBEsol)'
+    assert adapter.capabilities().functionals == (('PBEsol', 'PBEsol'),)
+    assert adapter.default_method().functional == 'PBEsol'  # PBE is the default only where there is one
 
 
 def test_espresso_pseudo_wins_and_a_missing_program_is_not_found(tmp_path, monkeypatch):
@@ -183,9 +202,10 @@ def test_charge_spin_and_dispersion(pseudo, nacl):
 
 
 def test_fixed_occupations_for_insulators(pseudo, nacl):
-    # Valence charges in both UPF header styles: v2 attribute, v1 line.
-    (pseudo / 'Na.paw.pbe.upf').write_text('<PP_HEADER z_valence="9.000000000000e0"/>', encoding='utf-8')
-    (pseudo / 'cl_pbe_v1.uspp.F.UPF').write_text('   7.00000000000      Z valence\n', encoding='utf-8')
+    # Valence charges and functionals in both UPF header styles: v2 attributes, v1 lines.
+    (pseudo / 'Na.paw.pbe.upf').write_text('<PP_HEADER functional="PBE" z_valence="9.000000000000e0"/>', encoding='utf-8')
+    v1 = '  SLA  PW   PBX  PBC    PBE  Exchange-Correlation functional\n   7.00000000000      Z valence\n'
+    (pseudo / 'cl_pbe_v1.uspp.F.UPF').write_text(v1, encoding='utf-8')
     adapter = QuantumEspressoAdapter()
     adapter.pseudo_folder = pseudo
     calculations = Calculations()
@@ -201,6 +221,63 @@ def test_fixed_occupations_for_insulators(pseudo, nacl):
 
     method.occupations = 'smearing'
     assert 'epsil' not in adapter.input_files(nacl, calculations, method, RunSettings())['ph.in']
+
+
+@pytest.mark.parametrize(
+    ('header', 'expected'),
+    [
+        ('<PP_HEADER functional="PBE"/>', 'PBE'),
+        ('<PP_HEADER functional=" SLA  PW   PBX  PBC"/>', 'PBE'),
+        ('<PP_HEADER functional="PBESOL"/>', 'PBEsol'),
+        ('<PP_HEADER\n  functional="SLA PW PSX PSC"/>', 'PBEsol'),
+        ('<PP_HEADER functional="PZ"/>', 'LDA'),
+        ('  SLA PZ NOGX NOGC  PZ  Exchange-Correlation functional\n', 'LDA'),
+        ('  SLA  PW   PSX  PSC    PBESOL  Exchange-Correlation functional\n', 'PBEsol'),
+        ('<PP_HEADER functional="SCAN"/>', 'SCAN'),  # pw.x's own name for one not known here
+        ('<PP_HEADER z_valence="4"/>', ''),
+    ],
+)
+def test_functional_from_the_upf_header(tmp_path, header, expected):
+    path = tmp_path / 'Si.upf'
+    path.write_text(header, encoding='utf-8')
+    assert quantum_espresso.functional(path) == expected
+
+
+def test_a_library_per_functional(tmp_path):
+    root = _library(tmp_path / 'pseudo', UPF_PBE)
+    pbesol = _library(root / 'PBEsol-SSSP', '<PP_HEADER functional="PBESOL"/>')
+    _library(root / 'pbe-precision', UPF_PBE)  # a second PBE library: the folder's own files win
+    _library(root / 'unknown', '<PP_HEADER/>')  # no functional stated: named after its folder
+    (root / 'empty').mkdir()
+
+    assert quantum_espresso.pseudo_libraries(root) == {'PBE': root, 'PBEsol': pbesol, 'unknown': root / 'unknown'}
+    # The library of most of its files names it.
+    (pbesol / 'Si.upf').write_text(UPF_PBE, encoding='utf-8')
+    assert quantum_espresso.pseudo_libraries(root)['PBEsol'] == pbesol
+
+
+def test_the_functional_chooses_the_library(tmp_path, nacl):
+    root = _library(tmp_path / 'pseudo', UPF_PBE)
+    pbesol = _library(root / 'pbesol', '<PP_HEADER functional="PBESOL"/>', 'Na.pbesol.upf', 'Cl.pbesol.UPF')
+    adapter = QuantumEspressoAdapter()
+    adapter.pseudo_folder = root
+    calculations = Calculations()
+    calculations.set_selected(CalculationType.SINGLE_POINT, True)
+    method = adapter.default_method()
+    assert method.functional == 'PBE' and adapter.capabilities().functionals == (('PBE', 'PBE'), ('PBEsol', 'PBEsol'))
+
+    method.functional = 'PBEsol'
+    text = adapter.input_text(nacl, calculations, method, RunSettings())
+    assert f"pseudo_dir = '{pbesol.as_posix()}'" in text
+    assert '  Cl    35.4530  Cl.pbesol.UPF\n  Na    22.9898  Na.pbesol.upf\n' in text
+    assert 'input_dft' not in text  # pw.x reads the functional from the pseudopotentials
+
+    (pbesol / 'Na.pbesol.upf').write_text(UPF_PBE, encoding='utf-8')
+    with pytest.raises(ValueError, match=r'Na\.pbesol\.upf in .* was made with PBE, not PBEsol\.'):
+        adapter.input_text(nacl, calculations, method, RunSettings())
+    method.functional = 'LDA'
+    with pytest.raises(ValueError, match=r'No LDA pseudopotentials in .* \(found: PBE, PBEsol\)\.'):
+        adapter.input_text(nacl, calculations, method, RunSettings())
 
 
 def test_input_problems(pseudo, nacl, tmp_path):

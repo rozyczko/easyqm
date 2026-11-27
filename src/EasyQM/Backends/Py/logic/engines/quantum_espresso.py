@@ -12,11 +12,17 @@ ph.x and dynmat.x are found next to pw.x, with its prefix swapped: pw.exe gives 
 dynmat.exe on Windows, pw.x gives ph.x and dynmat.x elsewhere.
 
 Pseudopotentials come from one folder, found as pw.x looks for it (``ESPRESSO_PSEUDO``,
-then ``~/espresso/pseudo``) or as ``pseudo`` next to the ``bin`` folder of pw.x. It holds
-one UPF file per element, named after the element (``Si.us.pbe…upf``,
-``si_pbe_v1.uspp.F.UPF``), and ``cutoffs.json`` with the recommended cutoffs per element
-(``{"Si": {"cutoff_wfc": 30, "cutoff_rho": 240}, …}``, the SSSP convention). A job uses
-the largest cutoffs among its elements.
+then ``~/espresso/pseudo``) or as ``pseudo`` next to the ``bin`` folder of pw.x. The UPF
+files in that folder are one library, those in each of its subfolders another
+(``pseudo/pbesol/``). A library holds one UPF file per element, named after the element
+(``Si.us.pbe…upf``, ``si_pbe_v1.uspp.F.UPF``), and ``cutoffs.json`` with the recommended
+cutoffs per element (``{"Si": {"cutoff_wfc": 30, "cutoff_rho": 240}, …}``, the SSSP
+convention). A job uses the largest cutoffs among its elements.
+
+The functionals offered are those the libraries were made with, read from the UPF headers:
+pw.x takes the functional from the pseudopotentials, so choosing a functional chooses its
+library. Where two libraries share a functional, the first (the folder's own files, then the
+subfolders by name) is used.
 """
 
 import json
@@ -24,6 +30,7 @@ import math
 import os
 import re
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
@@ -61,10 +68,11 @@ DYNMAT_INPUT = """&input
 """
 _PROGRAMS = {PHONON_FILE_NAME: 'ph', DYNMAT_FILE_NAME: 'dynmat'}  # after pw.x
 
+DEFAULT_FUNCTIONAL = 'PBE'
 CAPABILITIES = Capabilities(
     families=(('DFT', 'DFT'),),
-    # The functional is the one the pseudopotentials were made with; pw.x reads it from them.
-    functionals=(('PBE', 'PBE'),),
+    # Without pseudopotentials; `capabilities` offers the functionals of the libraries found.
+    functionals=((DEFAULT_FUNCTIONAL, DEFAULT_FUNCTIONAL),),
     dispersions=(('none', 'None'), ('D3BJ', 'D3(BJ)'), ('D3', 'D3')),
     basis_sets=(('pw', 'Plane waves'),),
     auxiliary_bases=(),
@@ -92,6 +100,29 @@ _DFTD3_VERSIONS = {'D3': 3, 'D3BJ': 4}
 _DEGAUSS = 0.01  # Ry
 _EMPTY_BANDS = 4  # beyond the filled ones, so that fixed occupations still show the gap
 _Z_VALENCE = re.compile(r'z_valence\s*=\s*"\s*([-+.\deE]+)"|([-+.\deE]+)\s+Z valence')
+# UPF v2 header attribute, or the UPF v1 header line ('SLA PW PBX PBC  PBE  Exchange-Correlation functional').
+_FUNCTIONAL = re.compile(r'functional\s*=\s*"([^"]*)"|^[ \t]*(\S.*?)\s+Exchange-Correlation functional', re.MULTILINE)
+_HEADER_SIZE = 100_000  # characters of a UPF file read for its header; PP_INFO comes first
+# pw.x's names of functionals (Modules/funct.f90), short or as their exchange, correlation
+# and gradient-correction parts, to the names shown.
+_FUNCTIONAL_NAMES = {
+    'PBE': 'PBE',
+    'SLA PW PBX PBC': 'PBE',
+    'PBESOL': 'PBEsol',
+    'SLA PW PSX PSC': 'PBEsol',
+    'PZ': 'LDA',
+    'LDA': 'LDA',
+    'PW': 'LDA',
+    'SLA PZ': 'LDA',
+    'SLA PZ NOGX NOGC': 'LDA',
+    'SLA PW NOGX NOGC': 'LDA',
+    'PW91': 'PW91',
+    'SLA PW GGX GGC': 'PW91',
+    'REVPBE': 'revPBE',
+    'SLA PW REVX PBC': 'revPBE',
+    'BLYP': 'BLYP',
+    'SLA LYP B88 BLYP': 'BLYP',
+}
 
 
 class QuantumEspressoAdapter(EngineAdapter):
@@ -113,6 +144,8 @@ class QuantumEspressoAdapter(EngineAdapter):
         self.executable = executable
         # Set by `detect`, next to the executable it finds.
         self.pseudo_folder: Optional[Path] = None
+        self._libraries: dict[str, Path] = {}
+        self._libraries_of: Optional[Path] = None  # the pseudo folder `_libraries` was read from
 
     # Detection
 
@@ -124,15 +157,30 @@ class QuantumEspressoAdapter(EngineAdapter):
         path = str(Path(path))
         self.pseudo_folder = _pseudo_folder(Path(path))
         match = _VERSION_BANNER.search(banner([path, '-i', 'missing.in']))
-        detail = f'pseudopotentials in {self.pseudo_folder}' if self.pseudo_folder else 'no pseudopotential folder'
+        if self.pseudo_folder is None:
+            detail = 'no pseudopotential folder'
+        else:
+            self._libraries_of = None  # read the folder again: files may have been added
+            detail = f'pseudopotentials in {self.pseudo_folder} ({", ".join(self.libraries) or "no UPF files"})'
         return EngineInfo(found=True, version=match.group(1) if match else '', path=path, detail=detail)
 
+    @property
+    def libraries(self) -> dict[str, Path]:
+        """The pseudopotential library of each functional, in the order offered."""
+        if self._libraries_of != self.pseudo_folder:
+            self._libraries = pseudo_libraries(self.pseudo_folder) if self.pseudo_folder else {}
+            self._libraries_of = self.pseudo_folder
+        return self._libraries
+
     def capabilities(self) -> Capabilities:
-        return CAPABILITIES
+        if not self.libraries:
+            return CAPABILITIES
+        return replace(CAPABILITIES, functionals=tuple((name, name) for name in self.libraries))
 
     def default_method(self) -> Method:
+        libraries = self.libraries
         return Method(
-            functional='PBE',
+            functional=DEFAULT_FUNCTIONAL if DEFAULT_FUNCTIONAL in libraries or not libraries else next(iter(libraries)),
             dispersion='none',
             basis_set='pw',
             auxiliary_basis='',
@@ -154,9 +202,17 @@ class QuantumEspressoAdapter(EngineAdapter):
             raise ValueError(f'{self.name} does not compute Raman activities here; untick Raman.')
         if self.pseudo_folder is None:
             raise ValueError(f'No pseudopotential folder was found for {self.name}; set ESPRESSO_PSEUDO.')
+        library = self.libraries.get(method.functional)
+        if library is None:
+            found = ', '.join(self.libraries) or 'none'
+            raise ValueError(f'No {method.functional} pseudopotentials in {self.pseudo_folder} (found: {found}).')
         elements = sorted({atom.element for atom in sample.atoms})
-        pseudopotentials = find_pseudopotentials(self.pseudo_folder, elements)
-        cutoff_wfc, cutoff_rho = cutoffs(self.pseudo_folder, elements)
+        pseudopotentials = find_pseudopotentials(library, elements)
+        for name in pseudopotentials.values():
+            made_with = functional(library / name)
+            if made_with and made_with != method.functional:
+                raise ValueError(f'{name} in {library} was made with {made_with}, not {method.functional}.')
+        cutoff_wfc, cutoff_rho = cutoffs(library, elements)
 
         optimisation = calculations.geometry_optimisation if CalculationType.GEOMETRY_OPTIMISATION in steps else None
         calculation = 'scf'
@@ -167,7 +223,7 @@ class QuantumEspressoAdapter(EngineAdapter):
             f"calculation = '{calculation}'",
             "prefix = 'job'",
             "outdir = './tmp'",
-            f"pseudo_dir = '{self.pseudo_folder.as_posix()}'",
+            f"pseudo_dir = '{library.as_posix()}'",
         ]
         if optimisation is not None:
             energy, force = _RELAX_THRESHOLDS[optimisation.convergence]
@@ -180,7 +236,7 @@ class QuantumEspressoAdapter(EngineAdapter):
             f'ecutrho = {cutoff_rho:g}',
         ]
         if method.occupations == 'fixed':
-            electrons = sum(_valence(self.pseudo_folder / pseudopotentials[atom.element]) for atom in sample.atoms)
+            electrons = sum(_valence(library / pseudopotentials[atom.element]) for atom in sample.atoms)
             system += ["occupations = 'fixed'", f'nbnd = {math.ceil((electrons - sample.charge) / 2) + _EMPTY_BANDS}']
         else:
             system += ["occupations = 'smearing'", "smearing = 'cold'", f'degauss = {_DEGAUSS:g}']
@@ -246,6 +302,54 @@ def sibling(executable: str, program: str) -> str:
     path = Path(executable)
     rest = path.name[2:] if path.name.lower().startswith('pw') else path.suffix
     return str(path.with_name(program + rest))
+
+
+def pseudo_libraries(folder: Path) -> dict[str, Path]:
+    """The library of each functional: the folder's own UPF files, then each subfolder's.
+
+    A library is named after the functional most of its files state, or after its folder if
+    they state none. The first library of a functional wins.
+    """
+    libraries: dict[str, Path] = {}
+    try:
+        subfolders = sorted((path for path in folder.iterdir() if path.is_dir()), key=lambda path: path.name.lower())
+    except OSError:
+        return libraries
+    for library in (folder, *subfolders):
+        files = _upf_files(library)
+        if not files:
+            continue
+        stated = [name for name in map(functional, files) if name]
+        name = max(dict.fromkeys(stated), key=stated.count) if stated else library.name
+        libraries.setdefault(name, library)
+    return libraries
+
+
+def functional(path: Path) -> str:
+    """The functional a pseudopotential was made with, from its UPF header: 'PBE', 'PBEsol',
+    …, pw.x's own name for one not known here, or '' if the header states none."""
+    try:
+        with open(path, encoding='utf-8', errors='replace') as file:
+            match = _FUNCTIONAL.search(file.read(_HEADER_SIZE))
+    except OSError:
+        return ''
+    if match is None:
+        return ''
+    parts = (match.group(1) or match.group(2)).upper().split()
+    if not parts:
+        return ''
+    # UPF v1 lines give the parts and then the short name: 'SLA PW PBX PBC PBE'.
+    for key in (' '.join(parts), ' '.join(parts[:4]), ' '.join(parts[:2]), parts[-1]):
+        if key in _FUNCTIONAL_NAMES:
+            return _FUNCTIONAL_NAMES[key]
+    return ' '.join(parts)
+
+
+def _upf_files(folder: Path) -> list[Path]:
+    try:
+        return sorted(path for path in folder.iterdir() if path.suffix.lower() == '.upf' and path.is_file())
+    except OSError:
+        return []
 
 
 def find_pseudopotentials(folder: Path, elements: list[str]) -> dict[str, str]:
