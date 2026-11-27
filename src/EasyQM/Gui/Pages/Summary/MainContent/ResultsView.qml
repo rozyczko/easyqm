@@ -749,7 +749,8 @@ Rectangle {
                         EaElements.TextField {
                             width: EaStyle.Sizes.fontPixelSize * 5
                             horizontalAlignment: TextInput.AlignRight
-                            validator: DoubleValidator { bottom: 0.01; top: 1.0; decimals: 3 }
+                            // 'C': a decimal point, as the value is shown and parseFloat reads it, in any locale.
+                            validator: DoubleValidator { bottom: 0.01; top: 1.0; decimals: 3; locale: 'C' }
                             text: Globals.BackendWrapper.resultsDosBroadening
                             onEditingFinished: Globals.BackendWrapper.resultsSetDosBroadening(parseFloat(text))
                             ToolTip.text: qsTr('Standard deviation of the Gaussian each level is drawn with, 0.01 to 1 eV.')

@@ -269,6 +269,7 @@ class Assistant(QObject):
     def clear(self) -> None:
         """Forget the conversation; a turn in progress is cancelled and its answer dropped."""
         self.cancel()
+        self._voice.cancel()  # a transcript still being recognised would land in the new conversation
         self._voice.stopSpeaking()
         self._take_approval()  # a first question still waiting to be shared
         self._generation += 1
@@ -285,6 +286,7 @@ class Assistant(QObject):
         """At quit: cancel a turn and give its thread a bounded time to end."""
         self.cancel()
         self._voice.cancel()
+        self._voice.stopSpeaking()
         if self._thread is not None:
             self._thread.join(SHUTDOWN_WAIT_S)
 

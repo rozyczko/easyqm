@@ -135,6 +135,20 @@ class BandStructure:
             return False
         return all(abs(a - b) < 1e-6 for a, b in zip(self.kpoints[first], self.kpoints[second]))
 
+    def direct_point(self, edges: tuple[BandEdge, BandEdge]) -> Optional[int]:
+        """A k-point holding both band edges, where the gap is direct; None for an indirect gap.
+        Either edge can be reached at several k-points, so all of them are compared; the
+        valence band maximum `edges` names comes first."""
+        valence, conduction = edges
+
+        def reached(offset: int, energy: float) -> list[int]:
+            return [k for k in range(len(self.levels[0]))
+                    if any(channel[k][count - 1 + offset] == energy for channel, count in zip(self.levels, self.filled))]
+
+        tops = sorted(reached(0, valence.energy), key=lambda k: k != valence.k)
+        bottoms = reached(1, conduction.energy)
+        return next((k for k in tops if any(self.same_point(k, other) for other in bottoms)), None)
+
     def location(self, k: int) -> str:
         """Where a k-point is on the path: 'Γ', or 'Γ–X' between two named points."""
         distance = self.distances[k]

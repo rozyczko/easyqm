@@ -55,7 +55,7 @@ class Voice(QObject):
     def __init__(self, settings: AssistantSettings, recogniser=None, speaker=None, parent=None):
         super().__init__(parent)
         self._settings = settings
-        settings.changed.connect(self.stateChanged)
+        settings.changed.connect(self._settings_changed)
         self._recogniser = recogniser if recogniser is not None else Recogniser(model_folder())
         self._prompt = vocabulary_prompt((ORCA_CAPABILITIES, QE_CAPABILITIES))
         self._speaker = None  # a QTextToSpeech, made on first use
@@ -240,4 +240,13 @@ class Voice(QObject):
 
     def _set_message(self, message: str) -> None:
         self._message = message
+        self.stateChanged.emit()
+
+    def _settings_changed(self) -> None:
+        """Turning speech input off drops a recording or recognition in progress, and turning
+        reading aloud off stops the answer being read."""
+        if not self._settings.speechInput:
+            self.cancel()
+        if not self._settings.readAloud:
+            self.stopSpeaking()
         self.stateChanged.emit()

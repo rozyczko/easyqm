@@ -166,7 +166,7 @@ def _band_edges(sources: list[tuple[Levels, Optional[list[int]]]]) -> tuple[Opti
     """Valence band maximum and conduction band minimum over every source's levels."""
     valence, conduction = float('-inf'), float('inf')
     for levels, filled in sources:
-        if not levels:
+        if not any(levels):  # no eigenvalues printed: [[]] when pw.x leaves out a long table
             continue
         if filled is None or len(filled) != len(levels):
             return None, None

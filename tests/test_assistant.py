@@ -756,6 +756,25 @@ def test_nothing_is_read_aloud_when_turned_off(spoken, qcore_application):
     assert spoken.speaker.said == [] and spoken.assistant.messages[-1]['text'] == 'Done.'
 
 
+def test_clearing_drops_a_transcript_still_being_recognised(chat, qcore_application):
+    gate = threading.Event()
+    chat.settings.setSpeechInput(True)
+    voice = Voice(chat.settings, recogniser=FakeRecogniser('the old question', gate=gate))
+    chat.assistant.shutdown()
+    chat.assistant = Assistant(chat.workspace, chat.settings, delay_ms=10, voice=voice)
+    texts = emissions(voice.transcribed)
+
+    voice.recognise(b'\x00\x00' * 16000, 16000, 1, 'int16')
+    chat.assistant.clear()
+    assert not voice.transcribing
+    gate.set()
+    deadline = time.monotonic() + 0.3
+    while time.monotonic() < deadline:
+        qcore_application.processEvents()
+    assert texts == []
+    chat.assistant.shutdown()
+
+
 def test_a_declined_action_skips_the_rest_of_its_step(chat, qcore_application):
     chat.settings.setApprovalMode('every')
     client = chat.script(

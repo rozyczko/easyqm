@@ -22,7 +22,8 @@ Column {
         EaElements.TextField {
             width: parent.width
             horizontalAlignment: TextInput.AlignLeft
-            validator: DoubleValidator { bottom: 0.001; top: 10; notation: DoubleValidator.StandardNotation }
+            // 'C': a decimal point, as parseFloat reads it, in any locale.
+            validator: DoubleValidator { bottom: 0.001; top: 10; notation: DoubleValidator.StandardNotation; locale: 'C' }
             text: Globals.BackendWrapper.methodKpointSpacing
             onEditingFinished: Globals.BackendWrapper.methodSetKpointSpacing(parseFloat(text))
         }

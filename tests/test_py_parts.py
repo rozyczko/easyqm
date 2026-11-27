@@ -1037,6 +1037,14 @@ def test_results_band_structure_relative_to_the_valence_band_maximum(qcore_appli
     assert curve['energies'][peak] == pytest.approx(-1.0, abs=0.02)  # the level at 0 eV, 1 eV below the VBM
     assert curve['max'] == pytest.approx(2.0 / (0.1 * math.sqrt(2 * math.pi)), rel=1e-2)
 
+    # The narrowest broadening gets energies close enough to keep its peaks.
+    results.setDosBroadening(0.01)
+    narrow = results.densityOfStates
+    step = narrow['energies'][1] - narrow['energies'][0]
+    assert len(narrow['energies']) > 600 and step <= 0.005 + 1e-12
+    assert narrow['max'] == pytest.approx(2.0 / (0.01 * math.sqrt(2 * math.pi)), rel=1e-2)
+    results.setDosBroadening(0.1)
+
     # Without a band structure, the DOS grid's highest level; no cap above.
     high = DensityOfStates([[[0.0, 1.0, 15.0]]], [2.0], filled=[2])
     results.set_results(ResultsLogic(homo=1.0, lumo=2.0, crystal=True, density_of_states=high))
@@ -1048,6 +1056,12 @@ def test_results_direct_gap_metal_and_broadening(qcore_application):
     direct = [[[-1.0, 0.0, 2.0], [-1.0, 1.0, 1.5], [-1.0, 0.0, 2.0], [-1.0, 0.0, 2.0]]]
     results.set_results(ResultsLogic(homo=1.0, lumo=1.5, crystal=True, band_structure=_bands(direct)))
     assert results.bandGapText == 'Direct gap of 0.50 eV at a point on Γ–X.'
+
+    # The VBM is reached at Γ and at X, the CBM only at X: direct at X, not indirect from Γ.
+    tied = [[[-1.0, 0.0, 2.0], [-1.0, -0.5, 2.5], [-1.0, 0.0, 1.0], [-1.0, -0.2, 3.0]]]
+    results.set_results(ResultsLogic(homo=0.0, lumo=1.0, crystal=True, band_structure=_bands(tied)))
+    assert results.bandGapText == 'Direct gap of 1.00 eV at X.'
+    assert results.tiles[0]['detail'].endswith('· direct')
 
     metal = ResultsLogic(fermi_energy=0.3, crystal=True, band_structure=_bands(direct, filled=None))
     results.set_results(metal)

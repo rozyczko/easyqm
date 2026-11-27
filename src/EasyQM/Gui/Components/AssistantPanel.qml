@@ -34,7 +34,8 @@ Rectangle {
     }
 
     function send(text) {
-        if (busy || text.trim() === '') {
+        // While a card waits for an answer the backend takes nothing: the text stays in the box.
+        if (busy || approvalPending || text.trim() === '') {
             return
         }
         Globals.BackendWrapper.assistantSend(text)
@@ -175,7 +176,10 @@ Rectangle {
                 fontIcon: 'trash-alt'
                 enabled: Globals.BackendWrapper.assistantMessageCount > 0 && !panel.busy
                 ToolTip.text: qsTr('Clear the conversation')
-                onClicked: Globals.BackendWrapper.assistantClear()
+                onClicked: {
+                    voiceSendTimer.stop()  // a transcript waiting to be sent stays in the box
+                    Globals.BackendWrapper.assistantClear()
+                }
             }
             EaElements.ToolButton {
                 fontIcon: 'times'

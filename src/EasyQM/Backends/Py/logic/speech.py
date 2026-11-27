@@ -104,15 +104,17 @@ _UNITS = (
 def speech_text(markdown: str) -> Optional[str]:
     """An answer as plain sentences to read aloud: code and tables are left to the panel, the
     Markdown marks go, units are written out. None when nothing is left to say."""
-    text = _FENCE.sub('\n(The code is shown in the panel.)\n', markdown)
-    lines, in_table = [], False
-    for line in text.splitlines():
-        if line.lstrip().startswith('|'):
-            if not in_table:
-                lines.append('(The table is shown in the panel.)')
-            in_table = True
+    rows = _FENCE.sub('\n(The code is shown in the panel.)\n', markdown).splitlines()
+    lines, i = [], 0
+    while i < len(rows):
+        line = rows[i]
+        i += 1
+        # A table: rows in pipes, or a header row over a delimiter row ('--- | ---') without them.
+        if line.lstrip().startswith('|') or ('|' in line and i < len(rows) and _delimiter_row(rows[i])):
+            lines.append('(The table is shown in the panel.)')
+            while i < len(rows) and '|' in rows[i]:
+                i += 1
             continue
-        in_table = False
         # single_point is said 'single point', not 'single underscore point'
         line = _MARKS.sub('', _LINK.sub(r'\1', _LIST.sub('', line))).replace('_', ' ').strip()
         if line:
@@ -121,3 +123,8 @@ def speech_text(markdown: str) -> Optional[str]:
     for pattern, words in _UNITS:
         spoken = pattern.sub(words, spoken)
     return spoken or None
+
+
+def _delimiter_row(line: str) -> bool:
+    """The row under a Markdown table's header: dashes, colons and pipes only."""
+    return '|' in line and '-' in line and not line.strip(' \t|:-')

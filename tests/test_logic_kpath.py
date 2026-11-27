@@ -65,6 +65,18 @@ def test_hexagonal_points_in_either_setting(gamma):
     assert math.dist(k, m) == pytest.approx(2 * math.pi / (3 * a))
 
 
+def test_close_named_points_keep_their_names_and_the_samples_between_stay_unnamed():
+    # Near 90°, B (η, ½, 1 − η) lies within the default tolerance of Z (½, ½, ½).
+    path = band_path(Cell.from_parameters(5, 5, 5, 89.9, 89.9, 89.9))
+    b, z = path.points['B'], path.points['Z']
+    assert path.lattice == 'Rhombohedral' and max(abs(x - y) for x, y in zip(b, z)) < 2e-3
+    assert path.label(z) == 'Z' and path.label(b) == 'B'
+    assert path.label(tuple((x + y) / 2 for x, y in zip(b, z))) == ''
+    # Well-separated points keep the full tolerance.
+    cubic = band_path(Cell.from_parameters(5.43, 5.43, 5.43, 90, 90, 90))
+    assert cubic.label((0.0015, 0.5, 0)) == 'X' and cubic.label((0.003, 0.5, 0)) == ''
+
+
 def test_the_unique_or_shortest_axis_is_found_in_any_position():
     tetragonal = Cell.from_parameters(6, 4, 4, 90, 90, 90)  # a unique
     assert band_path(tetragonal).points['Z'] == (0.5, 0, 0)

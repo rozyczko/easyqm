@@ -13,6 +13,7 @@ from Backends.Py.logic.calculations import Calculations
 from Backends.Py.logic.calculations import CalculationType
 from Backends.Py.logic.engines import base
 from Backends.Py.logic.engines import quantum_espresso
+from Backends.Py.logic.engines import quantum_espresso_output
 from Backends.Py.logic.engines.quantum_espresso import QuantumEspressoAdapter
 from Backends.Py.logic.engines.quantum_espresso import sibling
 from Backends.Py.logic.kpath import band_path
@@ -312,6 +313,12 @@ def test_reads_a_single_point():
 def test_reads_band_edges_per_spin_channel():
     results = QuantumEspressoAdapter().parse(SI_SPIN_SCF.read_text(encoding='utf-8'))
     assert (results.homo, results.lumo, results.fermi_energy) == (6.2528, 6.9439, 6.6820)
+
+
+def test_a_ground_state_without_printed_levels_leaves_the_edges_to_later_runs():
+    # Spin-polarised, with too many k-points for pw.x to print: one empty channel.
+    sources = [([[]], [1, 1]), ([[[0.0, 2.0]], [[0.1, 2.1]]], [1, 1])]
+    assert quantum_espresso_output._band_edges(sources) == (0.1, 2.0)
 
 
 def test_a_partly_filled_band_is_a_metal():

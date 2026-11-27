@@ -76,6 +76,11 @@ def test_an_answer_is_read_as_plain_sentences():
     assert speech_text('') is None and speech_text('**  **') is None
 
 
+def test_a_table_without_outer_pipes_is_left_to_the_panel():
+    answer = 'The gaps:\n\nEnergy | Value\n:--- | ---:\nGap | 1 eV\nVBM | 6 eV\n\nSo it is a or b | c.'
+    assert speech_text(answer) == 'The gaps: (The table is shown in the panel.) So it is a or b | c.'
+
+
 # The Voice part
 
 
@@ -129,6 +134,30 @@ def test_a_cancelled_recognition_gives_no_text(settings, qcore_application):
     while time.monotonic() < deadline:  # the worker's late answer arrives, and is dropped
         qcore_application.processEvents()
     assert texts == []
+
+
+def test_turning_speech_input_off_drops_a_recognition_in_progress(settings, qcore_application):
+    gate = threading.Event()
+    voice = Voice(settings, recogniser=FakeRecogniser('said before the opt-out', gate=gate))
+    texts = emissions(voice.transcribed)
+
+    voice.recognise(SECOND, 16000, 1, 'int16')
+    settings.setSpeechInput(False)
+    assert not voice.transcribing and not voice.inputEnabled
+    gate.set()
+    deadline = time.monotonic() + 0.3
+    while time.monotonic() < deadline:
+        qcore_application.processEvents()
+    assert texts == []
+
+
+def test_turning_reading_aloud_off_stops_the_answer(settings, qcore_application):
+    speaker = FakeSpeaker()
+    voice = Voice(settings, recogniser=FakeRecogniser(), speaker=speaker)
+    settings.setReadAloud(True)
+    voice.speak('A long answer.')
+    settings.setReadAloud(False)
+    assert speaker.stops == 1 and not voice.speaking
 
 
 def test_speech_input_is_off_until_turned_on(tmp_path, qcore_application, monkeypatch):

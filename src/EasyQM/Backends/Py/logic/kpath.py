@@ -17,6 +17,7 @@ cell.
 
 import math
 from dataclasses import dataclass
+from functools import cached_property
 
 from .geometry import norm
 
@@ -40,11 +41,20 @@ class KPath:
         return ' | '.join('–'.join(branch) for branch in self.branches)
 
     def label(self, k: Frac, tolerance: float = 2e-3) -> str:
-        """The name of the point at `k`, or ''."""
-        for name, point in self.points.items():
-            if all(abs(a - b) < tolerance for a, b in zip(k, point)):
-                return name
-        return ''
+        """The name of the nearest point within `tolerance` of `k`, or ''. Where two points
+        are closer than that (B and Z of a rhombohedral cell near 90°) the tolerance shrinks
+        below half their distance, so the samples between them stay unnamed."""
+        tolerance = min(tolerance, self._separation / 4)
+        name, distance = min(((name, _apart(k, point)) for name, point in self.points.items()),
+                             key=lambda item: item[1], default=('', math.inf))
+        return name if distance < tolerance else ''
+
+    @cached_property
+    def _separation(self) -> float:
+        """The smallest distance between two distinct named points, per fractional coordinate."""
+        points = list(self.points.values())
+        distances = [_apart(a, b) for i, a in enumerate(points) for b in points[i + 1 :]]
+        return min((d for d in distances if d > 1e-9), default=math.inf)
 
 
 def band_path(cell) -> KPath:
@@ -180,6 +190,11 @@ def _transformed(lattice: str, table, rows) -> KPath:
     points, branches = table
     moved = {name: tuple(sum(row[j] * k[j] for j in range(3)) + 0.0 for row in rows) for name, k in points.items()}
     return KPath(lattice, moved, branches)
+
+
+def _apart(a: Frac, b: Frac) -> float:
+    """The largest difference of fractional coordinates."""
+    return max(abs(x - y) for x, y in zip(a, b))
 
 
 def _distance(reciprocal, a: Frac, b: Frac) -> float:

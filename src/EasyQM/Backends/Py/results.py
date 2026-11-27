@@ -6,6 +6,7 @@ Only what the output contains is offered: a stat tile, the optimisation, frequen
 excited-states card appears when its numbers were found, whatever was ticked.
 """
 
+import math
 from typing import Optional
 
 from PySide6.QtCore import Property
@@ -23,7 +24,9 @@ _KCAL_PER_MOL = '\u00a0kcal/\u2060mol'  # no-break space, word joiner
 
 DOS_BROADENING = 0.1  # eV, the Gaussian width the DOS is drawn with until changed
 DOS_BROADENING_LIMITS = (0.01, 1.0)
-DOS_POINTS = 600  # energies the DOS curve is drawn at
+DOS_POINTS = 600  # energies the DOS curve is drawn at, at least
+DOS_STEP = 0.5  # broadenings between two of them at most: a narrow peak falls between wider steps
+DOS_MAX_POINTS = 10000  # for the plot; past this the step grows again
 # The window the bands and DOS are drawn in, relative to the reference energy: deep core-like
 # levels are left out below; above, it reaches the highest level computed at any k-point.
 ENERGY_BELOW = 20.0  # eV
@@ -316,8 +319,9 @@ class Results(QObject):
             return 'Metallic along the path: bands cross the Fermi energy.' if bands.filled is None else ''
         valence, conduction = edges
         gap = conduction.energy - valence.energy
-        if bands.same_point(valence.k, conduction.k):
-            return f'Direct gap of {gap:.2f} eV at {_place(bands, valence.k)}.'
+        direct = bands.direct_point(edges)
+        if direct is not None:
+            return f'Direct gap of {gap:.2f} eV at {_place(bands, direct)}.'
         return (f'Indirect gap of {gap:.2f} eV along the path: VBM at {_place(bands, valence.k)}, '
                 f'CBM at {_place(bands, conduction.k)}.')
 
@@ -348,8 +352,10 @@ class Results(QObject):
             return {}
         low, high = self._window()
         reference = self._reference()
-        step = (high - low) / (DOS_POINTS - 1)
-        energies = [low + i * step for i in range(DOS_POINTS)]
+        # At least DOS_POINTS, and close enough that the narrowest Gaussian keeps its shape.
+        points = max(DOS_POINTS, min(DOS_MAX_POINTS, math.ceil((high - low) / (self._broadening * DOS_STEP)) + 1))
+        step = (high - low) / (points - 1)
+        energies = [low + i * step for i in range(points)]
         values = dos.curve([energy + reference for energy in energies], self._broadening)
         return {'energies': energies, 'values': values, 'max': max(values, default=0.0)}
 
@@ -384,7 +390,7 @@ class Results(QObject):
         edges = bands.edges() if bands is not None else None
         if edges is None or (edges[0].energy, edges[1].energy) != (results.homo, results.lumo):
             return ''
-        return 'direct' if bands.same_point(edges[0].k, edges[1].k) else 'indirect'
+        return 'direct' if bands.direct_point(edges) is not None else 'indirect'
 
 
 def _place(bands, k: int) -> str:
