@@ -44,6 +44,15 @@ Column {
         }
     }
 
+    // How the active engine will compute them with the current method (CASTEP), else hidden.
+    EaElements.Label {
+        visible: Globals.BackendWrapper.methodFrequenciesNote !== ''
+        width: EaStyle.Sizes.sideBarContentWidth
+        wrapMode: Text.WordWrap
+        color: EaStyle.Colors.themeForegroundMinor
+        text: Globals.BackendWrapper.methodFrequenciesNote
+    }
+
     EaElements.CheckBox {
         text: qsTr('Raman intensities')
         checked: Globals.BackendWrapper.calculationsFreqRaman

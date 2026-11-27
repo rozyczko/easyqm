@@ -5,7 +5,8 @@ import EasyApplication.Gui.Elements as EaElements
 
 
 // Engine card of the Method page: name, Found / Not found pill, version line and executable path.
-// A card that cannot run the current sample is faded and says why.
+// The active card has a blue border. A card that cannot run the current sample is faded and
+// says why; another one that can is clicked to make its engine the active one.
 Rectangle {
     id: card
 
@@ -16,14 +17,27 @@ Rectangle {
     property string program: ''  // looked up on PATH
     property bool active: true
     property string problem: ''
+    property bool selectable: true  // false while a job runs
+
+    signal selected()
 
     width: EaStyle.Sizes.fontPixelSize * 28
     height: column.height + EaStyle.Sizes.fontPixelSize * 2
     radius: 4
-    opacity: active ? 1 : 0.5
-    color: found && active ? Qt.alpha(EaStyle.Colors.blue, 0.06) : EaStyle.Colors.contentBackground
+    opacity: problem === '' ? 1 : 0.5
+    color: active ? Qt.alpha(EaStyle.Colors.blue, 0.06) : EaStyle.Colors.contentBackground
     border.width: 1
-    border.color: found && active ? EaStyle.Colors.blue : EaStyle.Colors.appBorder
+    border.color: active ? EaStyle.Colors.blue : (mouse.containsMouse && mouse.enabled ? EaStyle.Colors.themeForegroundMinor
+                                                                                       : EaStyle.Colors.appBorder)
+
+    MouseArea {
+        id: mouse
+        anchors.fill: parent
+        enabled: card.selectable && !card.active && card.problem === ''
+        hoverEnabled: true
+        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        onClicked: card.selected()
+    }
 
     Column {
         id: column

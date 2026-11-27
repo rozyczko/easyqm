@@ -70,8 +70,16 @@ def test_space_group_of_rock_salt_and_its_supercell(nacl_cif):
     assert sample.space_group().text == 'Fm-3m (225)'
     assert sample.space_group_warning(sample.space_group()) == ''
 
+    assert sample.primitive_count() == 4  # the conventional cell of an fcc lattice
     sample.make_supercell(2, 1, 1)  # a tetragonal block of a cubic crystal: still Fm-3m
     assert sample.space_group().number == 225 and sample.cell.space_group == ''
+    assert sample.primitive_count() == 8
+
+
+def test_primitive_count_of_a_primitive_cell_and_of_no_atoms():
+    atoms, cell = _crystal('2\nLattice="2.5 0 0 -1.25 2.165 0 0 0 6.7"\nB 0 0 0\nN 0 1.443 0\n')
+    assert symmetry.primitive_count(atoms, cell) == 1
+    assert symmetry.primitive_count([], cell) == 0 and Sample.benzene().primitive_count() == 0
 
 
 def test_space_group_follows_the_atoms(nacl_cif):

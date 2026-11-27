@@ -19,15 +19,17 @@ acoustic sum rule makes three modes zero; those are the translations and are lef
 
 The band structure's k-points are printed in Cartesian units of 2π/alat; their fractional
 coordinates name the points of the path, which `logic.kpath` finds again from the cell the
-run printed. The DOS run prints the weight of each k-point, and the curve is drawn from its
-levels with those weights.
+ground state started from: the one the bands input was written for. Distances, ticks and
+jumps between branches come from `logic.kpath.path_axis`, which the CASTEP parser shares. The
+DOS run prints the weight of each k-point, and the curve is drawn from its levels with those
+weights.
 """
 
-import math
 import re
 from typing import Optional
 
 from ..kpath import band_path
+from ..kpath import path_axis
 from ..results import BandStructure
 from ..results import DensityOfStates
 from ..results import Frequencies
@@ -35,15 +37,16 @@ from ..results import Levels
 from ..results import Mode
 from ..results import Optimisation
 from ..results import Results
+from ..results import sampled_band_edges
 from ..sample import Atom
 from ..sample import Cell
+from .parsing import ANGSTROM_PER_BOHR
+from .parsing import KM_PER_MOL_PER_IR_UNIT
 from .parsing import NUMBER
 from .parsing import block
 from .parsing import last_float
 
 EH_PER_RY = 0.5
-ANGSTROM_PER_BOHR = 0.529177210544
-KM_PER_MOL_PER_IR_UNIT = 42.2561  # dynmat.x IR activity, (D/Å)²/amu, in km/mol
 
 # The k-point header of an nscf run with tetrahedra: the DOS run.
 TETRAHEDRA = re.compile(r'\(tetrahedron method\)')
@@ -66,7 +69,6 @@ _SCF_END = 'End of self-consistent calculation'
 _NSCF_END = 'End of band structure calculation'
 _OPTIMISATION = 'BFGS Geometry Optimization'
 _CONVERGED = 'bfgs converged'
-_KINK = 0.9998  # cosine between two steps of the path below which it turns at an unnamed point
 
 
 def parse(output: str) -> Results:
@@ -77,11 +79,11 @@ def parse(output: str) -> Results:
     bands_text, dos_text = _non_scf_runs(pw[1:])
 
     energies = [float(value) * EH_PER_RY for value in _ENERGY.findall(ground_state)]
-    band_structure = _band_structure(bands_text) if bands_text else None
+    band_structure = _band_structure(bands_text, ground_state) if bands_text else None
     density_of_states = _density_of_states(dos_text) if dos_text else None
     sources = [(_levels(ground_state, _SCF_END), _filled(ground_state))]
     sources += [(part.levels, part.filled) for part in (band_structure, density_of_states) if part is not None]
-    valence, conduction = _band_edges(sources)
+    valence, conduction = sampled_band_edges(sources)
     fermi = density_of_states.fermi_energy if density_of_states and density_of_states.fermi_energy is not None else None
     return Results(
         final_energy=energies[-1] if energies else None,
@@ -162,60 +164,41 @@ def _kpoint_levels(text: str) -> list[tuple[tuple[float, ...], list[float]]]:
     return result
 
 
-def _band_edges(sources: list[tuple[Levels, Optional[list[int]]]]) -> tuple[Optional[float], Optional[float]]:
-    """Valence band maximum and conduction band minimum over every source's levels."""
-    valence, conduction = float('-inf'), float('inf')
-    for levels, filled in sources:
-        if not any(levels):  # no eigenvalues printed: [[]] when pw.x leaves out a long table
-            continue
-        if filled is None or len(filled) != len(levels):
-            return None, None
-        for channel, count in zip(levels, filled):
-            for energies in channel:
-                if count < 1 or len(energies) <= count:
-                    return None, None  # no empty band printed
-                valence, conduction = max(valence, energies[count - 1]), min(conduction, energies[count])
-    if conduction <= valence or valence == float('-inf'):
-        return None, None
-    return valence, conduction
-
-
 # Band structure and density of states
 
 
-def _band_structure(output: str) -> Optional[BandStructure]:
+def _band_structure(output: str, ground_state: str = '') -> Optional[BandStructure]:
+    """The bands run's levels along the path. The path's names come from the cell the ground
+    state started from, the one the bands input was written for: after a variable-cell
+    relaxation the bands run prints the relaxed cell, which can belong to another lattice."""
     channels = _channels(output, _NSCF_END)
-    alat = _ALAT.search(output)
-    axes = {int(match.group(1)) - 1: tuple(float(value) for value in match.groups()[1:]) for match in _AXIS.finditer(output)}
-    if not channels or not channels[0] or alat is None or len(axes) != 3:
+    printed = _printed_cell(output)
+    if not channels or not channels[0] or printed is None:
         return None
-    scale = float(alat.group(1)) * ANGSTROM_PER_BOHR  # Å
-    axes = [axes[i] for i in range(3)]
-    path = band_path(Cell(tuple(tuple(value * scale for value in axis) for axis in axes)))
+    _, axes = printed
+    path = band_path(_cell(_printed_cell(ground_state) or printed))
     kpoints = [k for k, _ in channels[0]]
-    names = [path.label(tuple(sum(k[j] * axis[j] for j in range(3)) for axis in axes)) for k in kpoints]
-
-    distances, ticks, starts = [0.0], [], [0]
-    if names[0]:
-        ticks.append((0.0, names[0]))
-    for i in range(1, len(kpoints)):
-        step = [a - b for a, b in zip(kpoints[i], kpoints[i - 1])]
-        if names[i] and names[i - 1]:  # two named points in a row: a jump between branches
-            distances.append(distances[-1])
-            starts.append(i)
-            ticks[-1] = (distances[-1], f'{ticks[-1][1]}|{names[i]}')
-            continue
-        distances.append(distances[-1] + math.sqrt(sum(x * x for x in step)) * 2 * math.pi / scale)
-        if names[i] or (i + 1 < len(kpoints) and _turns(step, kpoints[i + 1], kpoints[i])):
-            ticks.append((distances[-1], names[i]))
+    # Cartesian in 2π/alat to fractional in the reciprocal vectors: k·a_i, with a_i in alat.
+    fractional = [tuple(sum(k[j] * axis[j] for j in range(3)) for axis in axes) for k in kpoints]
+    distances, ticks, starts = path_axis(fractional, path, _cell(printed).reciprocal)
     levels = [[energies for _, energies in channel] for channel in channels]
     return BandStructure(distances, levels, ticks, starts, _filled(output), path.lattice, kpoints)
 
 
-def _turns(step, following, current) -> bool:
-    after = [a - b for a, b in zip(following, current)]
-    lengths = math.sqrt(sum(x * x for x in step)) * math.sqrt(sum(x * x for x in after))
-    return lengths > 0 and sum(a * b for a, b in zip(step, after)) / lengths < _KINK
+def _printed_cell(output: str) -> Optional[tuple[float, list[tuple[float, float, float]]]]:
+    """(alat in Å, the crystal axes in units of alat) as a run first prints them; None if missing."""
+    alat = _ALAT.search(output)
+    axes = {}
+    for match in _AXIS.finditer(output):  # a relaxation prints the axes again at the end
+        axes.setdefault(int(match.group(1)) - 1, tuple(float(value) for value in match.groups()[1:]))
+    if alat is None or len(axes) != 3:
+        return None
+    return float(alat.group(1)) * ANGSTROM_PER_BOHR, [axes[i] for i in range(3)]
+
+
+def _cell(printed: tuple[float, list[tuple[float, float, float]]]) -> Cell:
+    scale, axes = printed
+    return Cell(tuple(tuple(value * scale for value in axis) for axis in axes))
 
 
 def _density_of_states(output: str) -> Optional[DensityOfStates]:

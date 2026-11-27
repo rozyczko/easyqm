@@ -9,7 +9,7 @@ import Gui.Components as Components
 import Gui.Globals as Globals
 
 
-// Engine card and the Run card: one engine (ORCA), run locally and serially, with the
+// Engine cards and the Run card: the active engine, run locally and serially, with the
 // engine output followed live in the log view. Run workflow and Stop are in the sidebar.
 Rectangle {
     id: page
@@ -68,7 +68,8 @@ Rectangle {
             }
         }
 
-        // One card per engine; the one that runs the sample is active, the buttons above act on it.
+        // One card per engine; the active one runs the sample and the buttons above act on it.
+        // Another card that can run the sample is clicked to make its engine the active one.
         Flow {
             width: parent.width
             spacing: commonSpacing
@@ -84,6 +85,8 @@ Rectangle {
                     program: modelData.program
                     active: modelData.active
                     problem: modelData.problem
+                    selectable: !Globals.BackendWrapper.jobRunning
+                    onSelected: Globals.BackendWrapper.methodSetEngine(modelData.name)
                 }
             }
         }

@@ -210,6 +210,13 @@ QtObject {
     readonly property string methodEngineExecutableFilter: activeBackend.method.engineExecutableFilter
     function methodRedetect() { activeBackend.method.redetect() }
     function methodSetEnginePath(value) { activeBackend.method.setEnginePath(value) }
+    // Make an engine active and preferred for this kind of sample (a click on its card)
+    function methodSetEngine(name) { activeBackend.method.setEngine(name) }
+    // [{name, label, choices, value, tooltip}]: the options only the active engine has
+    readonly property var methodEngineOptions: activeBackend.method.engineOptions
+    function methodSetEngineOption(name, value) { activeBackend.method.setEngineOption(name, value) }
+    // How the active engine will compute the frequencies, or ''
+    readonly property string methodFrequenciesNote: activeBackend.method.frequenciesNote
     // Whether the engine runs this kind of system (molecule or crystal), and why not
     readonly property bool methodCanRun: activeBackend.method.canRun
     readonly property string methodCannotRunReason: activeBackend.method.cannotRunReason
@@ -396,6 +403,7 @@ QtObject {
     signal projectLoadError(string message)
     signal sampleLoadError(string message)
     signal sampleStructureLoaded()
+    signal methodWarning(string message)
     signal jobOutputAppended(string text)
     signal assistantReplied()
     signal assistantNavigateRequested(string page)
@@ -408,6 +416,7 @@ QtObject {
         activeBackend.project.projectLoadError.connect(projectLoadError)
         activeBackend.sample.loadError.connect(sampleLoadError)
         activeBackend.sample.structureLoaded.connect(sampleStructureLoaded)
+        activeBackend.method.warning.connect(methodWarning)
         activeBackend.job.outputAppended.connect(jobOutputAppended)
         activeBackend.assistant.replied.connect(assistantReplied)
         activeBackend.assistant.navigateRequested.connect(assistantNavigateRequested)

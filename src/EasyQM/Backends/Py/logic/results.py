@@ -124,8 +124,17 @@ class BandStructure:
     kpoints: list[tuple[float, float, float]] = field(default_factory=list)  # as the engine prints them
 
     def edges(self) -> Optional[tuple[BandEdge, BandEdge]]:
-        """Valence band maximum and conduction band minimum along the path; None for a metal."""
+        """Valence band maximum and conduction band minimum along the path; None for a metal,
+        or without an empty band."""
         return band_edges(self.levels, self.filled)
+
+    @property
+    def without_empty_bands(self) -> bool:
+        """Whether only the filled bands were computed at some k-point (Empty bands set to 0);
+        False without a filled count (a partly filled band)."""
+        if self.filled is None or len(self.filled) != len(self.levels):
+            return False
+        return any(len(energies) <= count for channel, count in zip(self.levels, self.filled) for energies in channel)
 
     def same_point(self, first: int, second: int) -> bool:
         """Whether two k-points of the path are one point (Γ is passed more than once)."""
@@ -210,6 +219,29 @@ def band_edges(levels: Levels, filled: Optional[list[int]]) -> Optional[tuple[Ba
             conduction = bottom if conduction is None or bottom.energy < conduction.energy else conduction
     if valence is None or conduction.energy <= valence.energy:
         return None
+    return valence, conduction
+
+
+def sampled_band_edges(sources: list[tuple[Levels, Optional[list[int]]]]) -> tuple[Optional[float], Optional[float]]:
+    """Valence band maximum and conduction band minimum (eV) over the levels of several runs
+    of one job, each with its filled bands per channel; (None, None) for a metal or when a
+    filled count is missing. A run without empty bands (Empty bands set to 0) still bounds the
+    maximum; the minimum then comes from the other runs. A run with no levels is skipped."""
+    valence, conduction = float('-inf'), float('inf')
+    for levels, filled in sources:
+        if not any(levels):  # no eigenvalues printed: [[]] when pw.x leaves out a long table
+            continue
+        if filled is None or len(filled) != len(levels):
+            return None, None
+        for channel, count in zip(levels, filled):
+            for energies in channel:
+                if count < 1 or len(energies) < count:
+                    return None, None  # not even the filled bands printed
+                valence = max(valence, energies[count - 1])
+                if len(energies) > count:
+                    conduction = min(conduction, energies[count])
+    if conduction <= valence or valence == float('-inf'):
+        return None, None
     return valence, conduction
 
 

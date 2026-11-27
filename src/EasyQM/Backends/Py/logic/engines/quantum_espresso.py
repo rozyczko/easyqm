@@ -125,6 +125,7 @@ class QuantumEspressoAdapter(EngineAdapter):
     }
     # pw.x ends normally after an SCF that did not converge, so ph.x starts and fails.
     failure_marker = re.compile(NOT_CONVERGED)
+    raman = False
 
     def __init__(self, executable: Optional[str] = None):
         self.executable = executable

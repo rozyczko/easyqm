@@ -27,12 +27,14 @@ from Backends.Py.logic.results import Excitation
 from Backends.Py.logic.results import ExcitedStates
 from Backends.Py.logic.results import Results as ResultsLogic
 from Backends.Py.logic.runner import JobState
+from Backends.Py.logic.sample import Cell
 from Backends.Py.method import Method
 from Backends.Py.py_backend import PyBackend
 from Backends.Py.results import Results
 from Backends.Py.sample import Sample
 from fakes import FakeAdapter
 from fakes import FakeCrystalAdapter
+from fakes import FakeSecondCrystalAdapter
 from fakes import ScriptAdapter
 from fakes import emissions as _emissions
 
@@ -733,12 +735,12 @@ def test_method_follows_the_sample_to_the_engine_that_runs_it(qcore_application,
     theory = _emissions(method.levelOfTheoryChanged)
     method.setFunctional('PBE0')
 
-    method.set_sample_cell(Sample().logic.cell)  # still a molecule: nothing switches
+    method.set_sample(Sample().logic.cell, ['C', 'H'])  # still a molecule: nothing switches
     assert method.engineName == 'ORCA' and not engine
 
     crystal = Sample()
     crystal.loadStructure(str(nacl_cif))
-    method.set_sample_cell(crystal.logic.cell)
+    method.set_sample(crystal.logic.cell, ['Cl', 'Na'])
 
     assert method.engineName == 'Quantum ESPRESSO' and method.canRun and len(engine) == 1
     assert method.functional == 'PBE' and method.basisSet == 'pw' and len(theory) == 2
@@ -750,9 +752,101 @@ def test_method_follows_the_sample_to_the_engine_that_runs_it(qcore_application,
     ]
     assert method.engineExecutableFilter == 'Quantum ESPRESSO executable (pw.x pw.exe pw)'
 
-    method.set_sample_cell(None)  # each engine kept its own settings
+    method.set_sample(None, [])  # each engine kept its own settings
     assert method.engineName == 'ORCA' and method.functional == 'PBE0' and method.stabilityCheckOffered
     assert method.engines[1]['problem'] == 'Quantum ESPRESSO runs crystals only; this sample is a molecule.'
+
+
+def _engines(tmp_path, found=(), preferred=''):
+    settings = _settings(tmp_path)
+    if preferred:
+        settings.setValue('engines/preferred/crystal', preferred)
+    adapters = [FakeAdapter(), FakeCrystalAdapter(), FakeSecondCrystalAdapter()]
+    for adapter in adapters:
+        adapter.info = EngineInfo(found=adapter.name in found)
+    method = Method(adapters=adapters, settings=settings)
+    method.set_sample(NACL_CELL, ['Cl', 'Na'])
+    return method
+
+
+NACL_CELL = Cell(((5.64, 0, 0), (0, 5.64, 0), (0, 0, 5.64)))
+QE, CASTEP = 'Quantum ESPRESSO', 'CASTEP'
+
+
+@pytest.mark.parametrize('found, preferred, active', [
+    ((), '', QE),  # nothing found, no preference: the first that can run a crystal
+    ((CASTEP,), '', CASTEP),  # the first found
+    ((QE, CASTEP), '', QE),  # both found: Quantum ESPRESSO until the user clicks CASTEP
+    ((QE, CASTEP), CASTEP, CASTEP),  # the preference
+    ((QE,), CASTEP, QE),  # the preferred engine is gone: a found one runs
+    ((), CASTEP, CASTEP),  # none found: the preferred one, so that its path can be set
+    ((QE,), 'ORCA', QE),  # a preference that cannot run a crystal, or names no engine, is ignored
+    ((QE,), 'NWChem', QE),
+])
+def test_method_chooses_the_crystal_engine(qcore_application, tmp_path, found, preferred, active):
+    method = _engines(tmp_path, found, preferred)
+    assert method.engineName == active
+    assert [card['active'] for card in method.engines] == [card['name'] == active for card in method.engines]
+
+
+def test_a_click_on_a_card_makes_its_engine_active_and_preferred(qcore_application, tmp_path):
+    method = _engines(tmp_path, found=(QE, CASTEP))
+    switched = {name: _emissions(getattr(method, name)) for name in (
+        'engineChanged', 'levelOfTheoryChanged', 'kpointsChanged', 'engineOptionsChanged', 'frequenciesNoteChanged')}
+    method.setFunctional('PBE')
+
+    method.setEngine(CASTEP)
+
+    assert method.engineName == CASTEP and all(switched.values())
+    assert method.engineExecutableFilter == 'CASTEP executable (castep.serial castep.serial.exe castep castep.exe)'
+    assert Method(adapters=[FakeAdapter(), FakeCrystalAdapter(), FakeSecondCrystalAdapter()],
+                  settings=_settings(tmp_path)).engineName == 'ORCA'  # a molecule: the crystal preference does not apply
+    method.setEngine('ORCA')  # cannot run a crystal
+    method.setEngine('NWChem')
+    assert method.engineName == CASTEP
+    method.setEngine(QE)
+    assert method.engineName == QE and _settings(tmp_path).value('engines/preferred/crystal') == QE
+    method.set_sample(None, [])
+    method.set_sample(NACL_CELL, ['Cl', 'Na'])
+    assert method.engineName == QE
+
+
+def test_engine_options_follow_the_engine_and_the_sample(qcore_application, tmp_path):
+    calculations = Calculations()
+    method = Method(adapters=[FakeAdapter(), FakeSecondCrystalAdapter()], settings=_settings(tmp_path),
+                    calculations=calculations.logic)
+    assert method.engineOptions == [] and method.frequenciesNote == ''  # ORCA has none
+    options = _emissions(method.engineOptionsChanged)
+    warnings = _emissions(method.warning)
+
+    method.set_sample(NACL_CELL, ['Na'])
+    assert [(option['name'], option['value']) for option in method.engineOptions] == [('library', 'lib'),
+                                                                                       ('precision', 'fine')]
+    assert method.engineOptions[0]['choices'] == [{'value': 'lib', 'label': 'Library'},
+                                                  {'value': 'na-only', 'label': 'Na only'}]
+    method.setEngineOption('library', 'na-only')
+    method.setEngineOption('library', 'missing')  # not offered: ignored
+    method.setEngineOption('size', 'large')
+    assert method.engineOptions[0]['value'] == 'na-only' and method.logic.engine_options == {'library': 'na-only'}
+    method.setEngineOption('precision', 'coarse')
+    assert warnings == [('precision is now coarse',)] and options
+
+    calculations.setSelected('vibrational_frequencies', True)
+    assert method.frequenciesNote == 'Frequencies with na-only'
+
+    method.set_sample(NACL_CELL, ['Cl', 'Na'])  # 'na-only' no longer offered: back to the default, and said so
+    assert method.engineOptions[0]['value'] == 'lib' and 'library' not in method.logic.engine_options
+    assert warnings[-1] == ('Library: the previous choice is not available for this sample, so Library is used.',)
+    assert method.logic.engine_options == {'precision': 'coarse'}
+
+    method.reset()
+    assert method.logic.engine_options == {} and method.engineOptions[1]['value'] == 'fine'
+
+
+def test_a_card_that_is_found_but_does_not_start_says_why(qcore_application):
+    adapter = FakeAdapter()
+    adapter.info = EngineInfo(found=False, path='C:/castep.exe', detail='castep.exe does not start (0xC0000135: …)')
+    assert Method(adapters=[adapter]).engineCardText == 'castep.exe does not start (0xC0000135: …)'
 
 
 # Job
@@ -822,6 +916,17 @@ def test_job_fails_on_exit_code_or_missing_success_line(qcore_application, tmp_p
     assert job.state == 'failed' and job.folder.endswith('002')
 
 
+def test_job_fails_on_a_step_that_exits_with_zero_and_says_why(qcore_application, tmp_path):
+    job = _job(tmp_path, 'print("SCF did not converge")\n')
+    job._adapter.step_succeeded = lambda text: 'DONE' in text
+    job._adapter.failure_reason = lambda output: 'the SCF did not converge'
+    job.run()
+    _wait_for(job, qcore_application)
+    assert job.state == 'failed'
+    assert re.fullmatch(r'ORCA failed in Single point energy after \d+ s: the SCF did not converge', job.message)
+    assert job.stepStates == {'single_point': 'failed'}
+
+
 def test_job_does_not_start_without_engine_or_calculation(qcore_application, tmp_path):
     job = _job(tmp_path, 'print("DONE")\n', selected=False)
     job.run()
@@ -876,6 +981,21 @@ def test_backend_relays_the_cell_to_the_method_part(backend, nacl_cif):
     assert backend.method.kpointGrid == [3, 3, 1]
     backend.method.setKpointSpacing(0.05)  # a new spacing replaces the grid set by hand
     assert backend.method.kpointGrid == [4, 4, 4]
+
+
+def test_backend_warns_of_folded_bands_for_a_conventional_cell_and_a_supercell(backend, nacl_cif):
+    backend.sample.loadStructure(str(nacl_cif))
+    assert 'conventional cell of a centred lattice (Fm-3m)' in backend.calculations.bandsFoldedReason
+
+    backend.sample.makeSupercell(2, 1, 1)  # the file's group goes; the atoms keep theirs
+    assert 'holds 8 primitive cells' in backend.calculations.bandsFoldedReason
+
+    backend.sample.loadStructure(str(nacl_cif))
+    backend.sample.setCellParameter('a', '5.7')  # an edit drops the file's group too
+    backend.sample.setCellParameter('b', '5.7')
+    backend.sample.setCellParameter('c', '5.7')
+    assert backend.sample.logic.cell.space_group == ''
+    assert 'conventional cell of a centred lattice (Fm-3m)' in backend.calculations.bandsFoldedReason
 
 
 def test_backend_greys_excited_states_for_a_crystal(backend, nacl_cif):
@@ -1062,6 +1182,14 @@ def test_results_direct_gap_metal_and_broadening(qcore_application):
     results.set_results(ResultsLogic(homo=0.0, lumo=1.0, crystal=True, band_structure=_bands(tied)))
     assert results.bandGapText == 'Direct gap of 1.00 eV at X.'
     assert results.tiles[0]['detail'].endswith('· direct')
+
+    # An even electron count with overlapping bands is a metal too; without empty bands no gap is known.
+    overlapping = [[[-1.0, 1.0, 2.0], [-1.0, 2.5, 3.0], [-1.0, 0.0, 2.0], [-1.0, 0.0, 2.0]]]
+    results.set_results(ResultsLogic(fermi_energy=2.2, crystal=True, band_structure=_bands(overlapping)))
+    assert results.bandGapText.startswith('Metallic along the path')
+    filled_only = [[[-1.0, 0.0]] * 4]
+    results.set_results(ResultsLogic(homo=0.5, lumo=1.5, crystal=True, band_structure=_bands(filled_only)))
+    assert results.bandGapText.startswith('No gap along the path: only the filled bands')
 
     metal = ResultsLogic(fermi_energy=0.3, crystal=True, band_structure=_bands(direct, filled=None))
     results.set_results(metal)

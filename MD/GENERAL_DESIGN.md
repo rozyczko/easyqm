@@ -150,6 +150,9 @@ Main area, top: **Engine cards** for ORCA, PSI4 and CASTEP. On start-up the app 
 `PATH`, conda environments and a user-configured path list, and shows version and
 location, or *Not found* with a *Configure paths…* button. Cards that cannot handle the
 current system (CASTEP for a molecule, ORCA for a crystal) are greyed with the reason.
+Where several engines can run the system (Quantum ESPRESSO and CASTEP for a crystal), a
+click on a card makes it the active one, remembered per kind of system on the machine.
+Options only one engine has are in the Extra controls, group *Engine-specific*.
 
 Main area, bottom: the **Run** card.
 

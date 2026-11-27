@@ -20,9 +20,11 @@ between them:
 | `calculations.externalSelectionChanged` | `project.setCalculations` | names of the ticked calculations |
 | `method.engineChanged` | `project.setEngine` | engine name |
 | `method.engineChanged` | `job.set_executable` | the detected executable, or none |
+| `sample.externalSampleChanged` | `method.set_sample` | the cell and elements: the engine for a molecule or a crystal, and the engine options that cover the elements |
+| `calculations.selectionChanged`, `calculations.frequenciesChanged` | `method.frequenciesNoteChanged` | the line on how the engine computes frequencies |
 | `project.createdChanged`, `project.locationChanged` | `job.set_root_folder` | runs go into `<project>/runs/` once the project exists |
 | `job.stateChanged` | `project.setStatus` | running, completed, failed, stopped |
-| `job.stateChanged` | `results.clear` / `results.set_results` | Summary results: cleared when a job starts, parsed from the output when it ends |
+| `job.stateChanged` | `results.clear` / `results.set_results` | Summary results: cleared when a job starts, read by the job's adapter (`read_results`) from its output and run folder when it ends |
 
 The GUI reaches the backend only through `Gui/Globals/BackendWrapper.qml`.
 
@@ -41,10 +43,15 @@ Plain Python, no PySide. This is where the project state, the sample, the calcul
 catalogue and options, the method settings, and the engine adapters live until they are
 extracted into a Qt-free library package.
 
-`logic/engines/` holds one adapter per quantum-chemistry code (`base.EngineAdapter`). An
-adapter knows how to detect its executable, which choices it offers to the Method page
-(`Capabilities`), how to write the input for a workflow, the command line, and how to tell
-from the output whether the job succeeded.
+`logic/engines/` holds one adapter per quantum-chemistry code (`base.EngineAdapter`): ORCA
+(`orca.py`), Quantum ESPRESSO (`quantum_espresso.py`) and CASTEP (`castep.py`), each with an
+`*_output.py` reader. An adapter knows how to detect its executable, which choices it offers to
+the Method page (`Capabilities`), the options only it has (`EngineOption`, shown in the Extra
+controls' Engine-specific group), how to write the input for a workflow, the steps the runner
+takes, the environment of its processes, and how to tell from the output whether each step and
+the job succeeded. Every hook has a default that fits an engine writing one log to standard
+output, so an adapter overrides only what its engine does differently; CASTEP overrides most
+of them, because it writes its log to a file and exits with code 0 after a failure.
 
 `logic/results.py` is the engine-agnostic results schema that an adapter's `parse()` fills
 (`engines/orca_output.py` for ORCA); `results.py` in the folder root formats it for the
@@ -57,6 +64,9 @@ the offline assistant. `logic/speech.py` is speech without Qt:
 - the conversion of a recording into what the recogniser takes;
 - an answer written as plain sentences to read aloud.
 
-`logic/runner.py` is the only code that starts a process: numbered run folders, the engine
-run as a subprocess with its output written to a file, incremental reading of that file,
-and stopping the engine with its child processes.
+`logic/runner.py` is the only code that starts a process: numbered run folders, the steps of
+a workflow (`Step`) run one after the other with their output written to one file,
+incremental reading of that file, and stopping the engine with its child processes. A step
+whose program writes its own log file (CASTEP's `<seed>.castep`) gets a header line, and the
+runner copies the log into the output file as it grows; a step is judged by its exit code and
+by the adapter's `step_succeeded` before the next starts.

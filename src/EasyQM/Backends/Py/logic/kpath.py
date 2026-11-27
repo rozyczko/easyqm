@@ -26,6 +26,7 @@ Frac = tuple[float, float, float]
 _LENGTH_TOLERANCE = 1e-3  # relative
 _ANGLE_TOLERANCE = 0.05  # degrees
 _BCC_ANGLE = math.degrees(math.acos(-1 / 3))  # 109.47°, between the primitive vectors
+_KINK = 0.9998  # cosine between two steps of the path below which it turns at an unnamed point
 GAMMA = 'Γ'
 
 
@@ -83,12 +84,30 @@ def band_path(cell) -> KPath:
     return _standard('General (no symmetry recognised)', _GENERAL)
 
 
-def folded_reason(cell, path: KPath) -> str:
-    """Why the bands of this cell are folded, or '': a conventional cell of a centred lattice."""
-    centring = cell.space_group[:1]
-    if centring not in ('F', 'I', 'A', 'B', 'C', 'R') or 'primitive' in path.lattice or 'Rhombohedral' in path.lattice:
+def folded_reason(cell, path: KPath, primitive_cells: int = 0, group: str = '') -> str:
+    """Why the bands of this cell are folded, or '': a conventional cell of a centred lattice,
+    or a supercell. `primitive_cells` is how many primitive cells the atoms fill it with and
+    `group` their space group, both from spglib; without them (0, '') the file's space group
+    alone decides, which misses a supercell or an edited cell."""
+    group = group or cell.space_group
+    centring = group[:1]
+    conventional = (centring in _CENTRED_CELLS and 'primitive' not in path.lattice
+                    and 'Rhombohedral' not in path.lattice)
+    if primitive_cells == 0:
+        return _conventional_reason(group) if conventional else ''
+    if primitive_cells == 1:
         return ''
-    return (f'The cell is the conventional cell of a centred lattice ({cell.space_group}), so the bands of its '
+    if conventional and primitive_cells == _CENTRED_CELLS[centring]:
+        return _conventional_reason(group)
+    return (f'The cell holds {primitive_cells} primitive cells, as a supercell does, so the bands of the '
+            'primitive cell appear folded into its smaller zone. A primitive cell gives the textbook band structure.')
+
+
+_CENTRED_CELLS = {'F': 4, 'I': 2, 'A': 2, 'B': 2, 'C': 2, 'R': 3}  # primitive cells in the conventional one
+
+
+def _conventional_reason(group: str) -> str:
+    return (f'The cell is the conventional cell of a centred lattice ({group}), so the bands of its '
             'primitive cell appear folded. A primitive cell gives the textbook band structure.')
 
 
@@ -107,6 +126,46 @@ def path_kpoints(cell, path: KPath, points: int) -> list[tuple[Frac, int, str]]:
             vertices.append((path.points[name], next(counts), name))
         vertices.append((path.points[branch[-1]], 1, branch[-1]))  # a jump, or the end
     return vertices
+
+
+def path_points(cell, path: KPath, points: int) -> list[tuple[Frac, str]]:
+    """Every k-point of the path, as an engine without ``crystal_b`` takes them (CASTEP's
+    ``spectral_kpoint_list``): the points `path_kpoints` spreads, each with its name, '' between
+    the named ones. The last point of a branch and the first of the next are both named, which
+    marks the jump."""
+    vertices = path_kpoints(cell, path, points)
+    result = []
+    for (start, count, name), (end, _, _) in zip(vertices, vertices[1:]):
+        if count == 1:  # the end of a branch: the next vertex starts another
+            result.append((tuple(start), name))
+            continue
+        result += [(tuple(a + (b - a) * j / count for a, b in zip(start, end)), name if j == 0 else '')
+                   for j in range(count)]
+    start, _, name = vertices[-1]
+    return result + [(tuple(start), name)]
+
+
+def path_axis(kpoints: list[Frac], path: KPath, reciprocal) -> tuple[list[float], list[tuple[float, str]], list[int]]:
+    """Where k-points computed along `path` go on the band-structure axis: (distance in Å⁻¹
+    of each, ticks as (distance, name), the first k-point of each branch). Two named points in
+    a row are a jump between branches, shown as one tick 'X|U'; the path turning at an unnamed
+    point gets an unnamed tick."""
+    names = [path.label(k) for k in kpoints]
+    points = [cartesian(reciprocal, k) for k in kpoints]
+    distances, ticks, starts = [0.0], [], [0]
+    if names and names[0]:
+        ticks.append((0.0, names[0]))
+    for i in range(1, len(kpoints)):
+        step = [a - b for a, b in zip(points[i], points[i - 1])]
+        if names[i] and names[i - 1]:
+            distances.append(distances[-1])
+            starts.append(i)
+            ticks[-1] = (distances[-1], f'{ticks[-1][1]}|{names[i]}')
+            continue
+        distances.append(distances[-1] + norm(step))
+        if names[i] or (i + 1 < len(kpoints) and _turns(step, points[i + 1], points[i])):
+            ticks.append((distances[-1], names[i]))
+    return distances, ticks, starts
 
 
 def cartesian(reciprocal, k: Frac) -> tuple[float, float, float]:
@@ -199,6 +258,13 @@ def _apart(a: Frac, b: Frac) -> float:
 
 def _distance(reciprocal, a: Frac, b: Frac) -> float:
     return norm(tuple(x - y for x, y in zip(cartesian(reciprocal, a), cartesian(reciprocal, b))))
+
+
+def _turns(step, following, current) -> bool:
+    """Whether the path changes direction at `current`, between `step` and the next one."""
+    after = [a - b for a, b in zip(following, current)]
+    lengths = norm(step) * norm(after)
+    return lengths > 0 and sum(a * b for a, b in zip(step, after)) / lengths < _KINK
 
 
 # Setyawan–Curtarolo tables: points, then the path

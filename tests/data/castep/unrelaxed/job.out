@@ -1,0 +1,30 @@
+==> job: Ground state
+ | Welcome to Academic Release CASTEP version 26.11|
+ type of calculation                            : single point energy
+ Method: Treating system as metallic with density mixing treatment of electrons,
+Final energy, E             =  -340.0508917130     eV
+Final free energy (E-TS)    =  -340.0561361232     eV
+NB est. 0K energy (E-0.5TS)      =  -340.0535139181     eV
+Dispersion corrected final energy*, Ecor          =  -340.3459133509     eV
+Dispersion corrected final free energy* (Ecor-TS) =  -340.3511577611     eV
+NB dispersion corrected est. 0K energy* (Ecor-0.5TS) =  -340.3485355560     eV
+Total time          =      4.67 s
+==> job-phonon: Vibrational frequencies
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ | Welcome to Academic Release CASTEP version 26.11|
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ type of calculation                            : phonon calculation
+ Method: Treating system as metallic with density mixing treatment of electrons,
+Final energy, E             =  -340.0508917135     eV
+Final free energy (E-TS)    =  -340.0561361261     eV
+NB est. 0K energy (E-0.5TS)      =  -340.0535139198     eV
+Dispersion corrected final energy*, Ecor          =  -340.3459133514     eV
+Dispersion corrected final free energy* (Ecor-TS) =  -340.3511577639     eV
+NB dispersion corrected est. 0K energy* (Ecor-0.5TS) =  -340.3485355577     eV
+ ?        Maximum force |F|max     =  1.025     eV/A                            ? 
+ERROR: Phonon run aborted because of unoptimised geometry. See job-phonon.castep for more details

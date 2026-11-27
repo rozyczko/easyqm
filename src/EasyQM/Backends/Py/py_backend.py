@@ -1,5 +1,7 @@
 # SPDX-FileCopyrightText: 2026 EasyQM contributors
 # SPDX-License-Identifier: BSD-3-Clause
+from pathlib import Path
+
 from PySide6.QtCore import Property
 from PySide6.QtCore import QObject
 from PySide6.QtCore import Signal
@@ -30,7 +32,7 @@ class PyBackend(QObject):
         self._project = Project(parent=self)
         self._sample = Sample(parent=self)
         self._calculations = Calculations(parent=self)
-        self._method = Method(parent=self)
+        self._method = Method(calculations=self._calculations.logic, parent=self)
         self._job = Job(
             adapter=self._method.adapter,
             sample=self._sample.logic,
@@ -124,6 +126,7 @@ class PyBackend(QObject):
             self._method.scfChanged,
             self._method.runSettingsChanged,
             self._method.kpointsChanged,
+            self._method.engineOptionsChanged,
             self._job.stateChanged,
         )
         for signal in parts:
@@ -155,6 +158,9 @@ class PyBackend(QObject):
         self._project.locationChanged.connect(self._relay_project_folder)
         self._job.stateChanged.connect(self._relay_job_state)
         self._job.stateChanged.connect(self._relay_results)
+        # How the engine computes frequencies depends on what is selected, not on the method alone.
+        for signal in (self._calculations.selectionChanged, self._calculations.frequenciesChanged):
+            signal.connect(self._method.frequenciesNoteChanged)
         # The parts hold their initial state before any signal fires.
         self._relay_sample()
         self._relay_calculations()
@@ -163,9 +169,14 @@ class PyBackend(QObject):
 
     def _relay_sample(self) -> None:
         self._project.setSampleName(f'{self._sample.formula}, {self._sample.atomCount} atoms')
-        self._method.set_sample_cell(self._sample.logic.cell)
+        sample = self._sample.logic
+        self._method.set_sample(sample.cell, sorted({atom.element for atom in sample.atoms}))
         self._calculations.set_periodic(self._sample.periodic)
-        self._calculations.set_cell(self._sample.logic.cell)
+        if sample.periodic:  # spglib takes milliseconds, even for the largest supercells
+            group = sample.space_group()
+            self._calculations.set_cell(sample.cell, sample.primitive_count(), group.symbol if group else '')
+        else:
+            self._calculations.set_cell(None)
 
     def _relay_calculations(self) -> None:
         self._project.setCalculations(self._calculations.selectedNames)
@@ -191,11 +202,12 @@ class PyBackend(QObject):
         if self._job.state == 'running':
             self._results.clear(describe(self._method.logic, self._method.adapter.capabilities()))
         elif self._job.state != 'idle':
-            results = self._job.adapter.parse(self._job.output)
+            folder = Path(self._job.folder) if self._job.folder else None
+            results = self._job.adapter.read_results(folder, self._job.output)
             self._results.set_results(results)
             optimisation = results.optimisation
             if self._job.state == 'completed' and optimisation is not None and optimisation.converged:
                 if self._sample.apply_optimisation(optimisation):
                     current = configuration(self._sample.logic, self._calculations.logic, self._method.logic,
-                                            self._method.run_settings)
+                                            self._method.run_settings, self._method.engineName)
                     self._job.mark_geometry_applied(current['sample'])

@@ -22,6 +22,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtCore import Slot
 
 from .assistant_settings import AssistantSettings
+from .logic.engines.castep import CAPABILITIES as CASTEP_CAPABILITIES
 from .logic.engines.orca import CAPABILITIES as ORCA_CAPABILITIES
 from .logic.engines.quantum_espresso import CAPABILITIES as QE_CAPABILITIES
 from .logic.speech import SPEECH_MODEL_MB
@@ -57,7 +58,7 @@ class Voice(QObject):
         self._settings = settings
         settings.changed.connect(self._settings_changed)
         self._recogniser = recogniser if recogniser is not None else Recogniser(model_folder())
-        self._prompt = vocabulary_prompt((ORCA_CAPABILITIES, QE_CAPABILITIES))
+        self._prompt = vocabulary_prompt((ORCA_CAPABILITIES, QE_CAPABILITIES, CASTEP_CAPABILITIES))
         self._speaker = None  # a QTextToSpeech, made on first use
         if speaker is not None:
             self._use_speaker(speaker)

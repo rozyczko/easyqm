@@ -1,0 +1,13 @@
+==> job: Ground state
+ | Welcome to Academic Release CASTEP version 26.11|
+ type of calculation                            : single point energy
+ Method: Treating system as metallic with density mixing treatment of electrons,
+Final energy, E             =  -337.8379633460     eV
+Final free energy (E-TS)    =  -337.8855274961     eV
+NB est. 0K energy (E-0.5TS)      =  -337.8617454210     eV
+Total time          =      4.92 s
+==> job-dos: Density of states
+ | Welcome to Academic Release CASTEP version 26.11|
+ type of calculation                            : Electronic Spectroscopy
+ Method: Treating system as metallic with density mixing treatment of electrons,
+Total time          =      5.20 s

@@ -66,11 +66,7 @@ def space_group(atoms: list[Atom], cell: Cell) -> Optional[SpaceGroup]:
     than the tolerance, for one)."""
     if not atoms:
         return None
-    structure = (
-        [list(vector) for vector in cell.vectors],
-        [list(cell.fractional(atom.x, atom.y, atom.z)) for atom in atoms],
-        [atomic_number(atom.element) for atom in atoms],
-    )
+    structure = _structure(atoms, cell)
     try:
         dataset = spglib.get_symmetry_dataset(structure, symprec=SPACE_GROUP_TOLERANCE)
     except spglib.error.SpglibError:
@@ -78,3 +74,26 @@ def space_group(atoms: list[Atom], cell: Cell) -> Optional[SpaceGroup]:
     if dataset is None:  # spglib before 2.7
         return None
     return SpaceGroup(dataset.international, dataset.number)
+
+
+def primitive_count(atoms: list[Atom], cell: Cell) -> int:
+    """How many primitive cells of the atoms this cell holds: 1 for a primitive cell, 4 for
+    the conventional cell of an fcc lattice, 8 for a 2 × 2 × 2 supercell of a primitive cell;
+    0 when spglib finds no primitive cell."""
+    if not atoms:
+        return 0
+    try:
+        primitive = spglib.find_primitive(_structure(atoms, cell), symprec=SPACE_GROUP_TOLERANCE)
+    except spglib.error.SpglibError:
+        return 0
+    if primitive is None or not len(primitive[2]):
+        return 0
+    return round(len(atoms) / len(primitive[2]))
+
+
+def _structure(atoms: list[Atom], cell: Cell) -> tuple:
+    return (
+        [list(vector) for vector in cell.vectors],
+        [list(cell.fractional(atom.x, atom.y, atom.z)) for atom in atoms],
+        [atomic_number(atom.element) for atom in atoms],
+    )

@@ -12,6 +12,7 @@ from Backends.Py.logic.method import Method
 from Backends.Py.logic.method import describe
 from Backends.Py.logic.results import Results
 from Backends.Py.logic.results import bonds_and_angles
+from Backends.Py.logic.results import sampled_band_edges
 
 DATA = Path(__file__).parent / 'data'
 WATER = DATA / 'orca_water_opt_freq.out'
@@ -122,3 +123,12 @@ def test_method_description():
     assert describe(Method(), CAPABILITIES) == 'B3LYP-D3(BJ)/def2-TZVP'
     assert describe(Method(functional='wB97X-D3', dispersion='none'), CAPABILITIES) == 'ωB97X-D3/def2-TZVP'
     assert describe(Method(family='HF', basis_set='def2-SVP'), CAPABILITIES) == 'HF/def2-SVP'
+
+
+def test_band_edges_over_several_runs():
+    # Spin-polarised, with too many k-points for pw.x to print: one empty channel.
+    assert sampled_band_edges([([[]], [1, 1]), ([[[0.0, 2.0]], [[0.1, 2.1]]], [1, 1])]) == (0.1, 2.0)
+    # A run without empty bands bounds the maximum only; overlapping edges are a metal.
+    assert sampled_band_edges([([[[0.5]]], [1]), ([[[0.0, 2.0]]], [1])]) == (0.5, 2.0)
+    assert sampled_band_edges([([[[0.0, 1.0], [1.5, 2.0]]], [1])]) == (None, None)
+    assert sampled_band_edges([([[[0.0, 1.0]]], None)]) == (None, None)

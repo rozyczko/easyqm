@@ -7,6 +7,9 @@ it offers, turns the sample, calculations and method into an input file, builds 
 line, judges from the output whether the job succeeded, and reads the results from it.
 Launching the process is the runner's job (`logic/runner.py`), so all engines look the same
 to it.
+
+Every hook below the abstract methods has a default that fits an engine writing one log to
+standard output (ORCA, pw.x), so an adapter overrides only what its engine does differently.
 """
 
 import re
@@ -20,7 +23,10 @@ from typing import Optional
 
 from ..calculations import CalculationType
 from ..method import Method
+from ..method import RunSettings
 from ..runner import NO_WINDOW
+from ..runner import Step
+from ..runner import process_environment
 
 Choices = tuple[tuple[str, str], ...]  # (value, label) pairs, in display order
 
@@ -54,6 +60,18 @@ class Capabilities:
     occupations: Choices = ()
 
 
+@dataclass(frozen=True)
+class EngineOption:
+    """A choice only this engine has, shown in the Method page's Engine-specific group. Its
+    value is `Method.engine_options[name]`; a missing key means `default`."""
+
+    name: str
+    label: str
+    choices: Choices
+    default: str
+    tooltip: str = ''
+
+
 class EngineAdapter(ABC):
     name: str
     # 'molecule' and/or 'crystal'
@@ -72,6 +90,8 @@ class EngineAdapter(ABC):
     failure_marker: Optional[re.Pattern] = None
     # Whether the input reads the memory run setting (the assistant refuses settings an engine ignores).
     uses_memory = False
+    # Whether the engine computes Raman activities.
+    raman = True
 
     @abstractmethod
     def detect(self) -> EngineInfo: ...
@@ -82,6 +102,18 @@ class EngineAdapter(ABC):
     def default_method(self) -> Method:
         """The method a new project starts with; its values are among `capabilities()`."""
         return Method()
+
+    def engine_options(self, elements: list[str]) -> tuple[EngineOption, ...]:
+        """The options only this engine has, for a sample of these elements."""
+        return ()
+
+    def option_warning(self, name: str, value: str, calculations, method) -> str:
+        """What the user should know after setting an engine option to `value`, or ''."""
+        return ''
+
+    def frequencies_note(self, calculations, method) -> str:
+        """One line on how the frequencies will be computed with this method, or ''."""
+        return ''
 
     def system_problem(self, periodic: bool) -> str:
         """Why this engine cannot run the sample, or '' if it can."""
@@ -106,6 +138,22 @@ class EngineAdapter(ABC):
         """The programs of the workflow, run one after the other on the files of `input_files`."""
         return [self.command(executable, Path(input_names[0]))]
 
+    def steps(self, executable: str, input_names: list[str]) -> list[Step]:
+        """The steps the runner takes; by default each command, its log on standard output."""
+        return [Step(command) for command in self.commands(executable, input_names)]
+
+    def environment(self, settings: RunSettings) -> dict[str, str]:
+        """Variables the engine's processes get on top of the application's; PATH goes in front."""
+        return {}
+
+    def step_succeeded(self, text: str) -> bool:
+        """Whether the text of a step that exited with code 0 shows it ended well."""
+        return True
+
+    def failure_reason(self, output: str) -> str:
+        """Why the job whose output this is failed, in one sentence for the user, or ''."""
+        return ''
+
     def current_step(self, output: str, steps: list[CalculationType]) -> int:
         """Index in `steps` of the last step whose start shows in `output` before any failure,
         0 before any."""
@@ -122,18 +170,29 @@ class EngineAdapter(ABC):
         """The results found in the output, as a `logic.results.Results`."""
         raise NotImplementedError(f'{self.name}: output parsing is not implemented.')
 
+    def read_results(self, folder: Optional[Path], output: str):
+        """The results of a job from its output and the files in its run folder (None when
+        the job got no folder); by default from the output alone."""
+        return self.parse(output)
 
-def banner(command: list[str]) -> str:
-    """What a program prints when started in an empty folder, e.g. with a missing input file.
 
-    Engines print their version in a banner before they complain, which is quicker and more
-    reliable than a version option most of them lack.
-    """
+@dataclass(frozen=True)
+class Probe:
+    """What a program printed to standard output, and its exit code; None if it did not end."""
+
+    text: str
+    code: Optional[int]
+
+
+def probe(command: list[str], environment: Optional[dict[str, str]] = None) -> Probe:
+    """Start a program in an empty folder and wait for it, with `environment` on top of the
+    application's. A program that cannot be started or does not end in time gives code None."""
     with tempfile.TemporaryDirectory(prefix='easyqm-') as folder:
         try:
             result = subprocess.run(
                 command,
                 cwd=folder,
+                env=process_environment(environment) if environment else None,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
@@ -142,5 +201,14 @@ def banner(command: list[str]) -> str:
                 creationflags=NO_WINDOW,
             )
         except (OSError, subprocess.SubprocessError):
-            return ''
-    return result.stdout or ''
+            return Probe('', None)
+    return Probe(result.stdout or '', result.returncode)
+
+
+def banner(command: list[str]) -> str:
+    """What a program prints when started in an empty folder, e.g. with a missing input file.
+
+    Engines print their version in a banner before they complain, which is quicker and more
+    reliable than a version option most of them lack.
+    """
+    return probe(command).text

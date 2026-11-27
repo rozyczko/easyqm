@@ -53,7 +53,7 @@ def test_version_from_banner_when_folder_has_none(tmp_path, monkeypatch):
     executable.parent.mkdir()
     executable.write_text('', encoding='utf-8')
     banner = '   Program Version 6.1.1  -  RELEASE   -\n'
-    monkeypatch.setattr(base.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=banner))
+    monkeypatch.setattr(base.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=banner, returncode=0))
 
     assert OrcaAdapter(str(executable)).detect().version == '6.1.1'
 
@@ -92,6 +92,7 @@ def test_method_defaults_are_orca_choices():
         'stability_check',
         'occupations',
         'kpoints',
+        'engine_options',
     }
 
 

@@ -10,9 +10,11 @@ from types import SimpleNamespace
 from PySide6.QtCore import QObject
 from PySide6.QtCore import Signal
 
+from Backends.Py.logic.calculations import CalculationType
 from Backends.Py.logic.engines.base import Capabilities
 from Backends.Py.logic.engines.base import EngineAdapter
 from Backends.Py.logic.engines.base import EngineInfo
+from Backends.Py.logic.engines.base import EngineOption
 from Backends.Py.logic.engines.orca import CAPABILITIES
 from Backends.Py.logic.engines.quantum_espresso import CAPABILITIES as QE_CAPABILITIES
 from Backends.Py.logic.engines.quantum_espresso import QuantumEspressoAdapter
@@ -85,6 +87,25 @@ class FakeCrystalAdapter(FakeAdapter):
 
     def default_method(self):
         return QuantumEspressoAdapter().default_method()
+
+
+class FakeSecondCrystalAdapter(FakeCrystalAdapter):
+    """A second crystal engine with options of its own: a library per element set, and a note."""
+
+    name = 'CASTEP'
+    programs = ('castep.serial', 'castep')
+
+    def engine_options(self, elements):
+        libraries = (('lib', 'Library'), *((('na-only', 'Na only'),) if elements == ['Na'] else ()))
+        return (EngineOption('library', 'Library', libraries, 'lib', 'Which potentials'),
+                EngineOption('precision', 'Precision', (('fine', 'Fine'), ('coarse', 'Coarse')), 'fine'))
+
+    def option_warning(self, name, value, calculations, method):
+        return f'{name} is now {value}' if value == 'coarse' else ''
+
+    def frequencies_note(self, calculations, method):
+        selected = CalculationType.VIBRATIONAL_FREQUENCIES in calculations.workflow()
+        return f'Frequencies with {method.engine_options.get("library", "lib")}' if selected else ''
 
 
 class ScriptAdapter(FakeAdapter):

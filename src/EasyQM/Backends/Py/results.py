@@ -316,7 +316,10 @@ class Results(QObject):
             return ''
         edges = bands.edges()
         if edges is None:
-            return 'Metallic along the path: bands cross the Fermi energy.' if bands.filled is None else ''
+            if bands.without_empty_bands:
+                return 'No gap along the path: only the filled bands were computed (raise Empty bands).'
+            # A partly filled band, or filled and empty bands that overlap (an even electron count).
+            return 'Metallic along the path: bands cross the Fermi energy.'
         valence, conduction = edges
         gap = conduction.energy - valence.energy
         direct = bands.direct_point(edges)

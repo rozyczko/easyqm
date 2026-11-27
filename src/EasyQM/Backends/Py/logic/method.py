@@ -50,6 +50,8 @@ class Method:
     stability_check: bool = False
     occupations: str = 'smearing'  # plane-wave engines: 'smearing' (metals) or 'fixed' (insulators)
     kpoints: KPoints = field(default_factory=KPoints)  # crystals only
+    # Values of the options only the engine has (`engines.base.EngineOption`), by option name.
+    engine_options: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

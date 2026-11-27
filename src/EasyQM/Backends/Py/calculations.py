@@ -44,6 +44,7 @@ class Calculations(QObject):
         super().__init__(parent)
         self._logic = logic if logic is not None else CalculationsLogic()
         self._cell = None
+        self._symmetry = (0, '')  # primitive cells in the cell and the atoms' space group, from spglib
 
     @property
     def logic(self) -> CalculationsLogic:
@@ -78,10 +79,12 @@ class Calculations(QObject):
             self.workflowChanged.emit()
             self.externalSelectionChanged.emit()
 
-    def set_cell(self, cell) -> None:
-        """The sample's `logic.sample.Cell`, or None for a molecule (for PyBackend)."""
-        if cell != self._cell:
-            self._cell = cell
+    def set_cell(self, cell, primitive_cells: int = 0, group: str = '') -> None:
+        """The sample's `logic.sample.Cell`, or None for a molecule, with how many primitive
+        cells its atoms fill it with and their space group (0 and '' when not known), for the
+        folded-bands warning (for PyBackend)."""
+        if (cell, (primitive_cells, group)) != (self._cell, self._symmetry):
+            self._cell, self._symmetry = cell, (primitive_cells, group)
             self.cellChanged.emit()
 
     # Table and workflow
@@ -322,7 +325,7 @@ class Calculations(QObject):
     @Property(str, notify=cellChanged)
     def bandsFoldedReason(self) -> str:
         """Why this cell's bands come folded, or ''."""
-        return folded_reason(self._cell, band_path(self._cell)) if self._cell is not None else ''
+        return folded_reason(self._cell, band_path(self._cell), *self._symmetry) if self._cell is not None else ''
 
     @Property(int, notify=bandStructureChanged)
     def bandsPoints(self) -> int:

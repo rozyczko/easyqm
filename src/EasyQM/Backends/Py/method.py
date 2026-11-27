@@ -2,14 +2,19 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Method page backend part: engines, level of theory, SCF and run settings for QML.
 
-Every engine has an adapter. The active engine is the first one that can run the sample
-(ORCA a molecule, Quantum ESPRESSO a crystal), so it changes when a molecule replaces a
-crystal or the other way round. The choice lists and values the page shows are the active
-engine's; each engine keeps its own `logic.method.Method`, so switching back loses nothing.
+Every engine has an adapter. Several engines can run a crystal, so the user picks one by
+clicking its card, and the choice is kept per kind of sample (molecule, crystal) in the
+machine settings, like the executables. When the kind of sample changes, the active engine
+is the first that applies of: the preferred engine if it was found; the first found engine
+that can run the sample; the preferred engine although not found (so that its path can be
+configured); the first engine that can run the sample.
+
+The choice lists and values the page shows are the active engine's; each engine keeps its
+own `logic.method.Method`, so switching back loses nothing. The options only one engine has
+(`engines.base.EngineOption`) are listed by `engineOptions` for the Engine-specific group.
 """
 
 from dataclasses import fields
-from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Property
@@ -22,6 +27,7 @@ from .helpers import apply
 from .helpers import choices
 from .helpers import to_local_path
 from .logic.engines.base import EngineAdapter
+from .logic.engines.castep import CastepAdapter
 from .logic.engines.orca import OrcaAdapter
 from .logic.engines.quantum_espresso import QuantumEspressoAdapter
 from .logic.method import Method as MethodLogic
@@ -38,25 +44,37 @@ class Method(QObject):
     # The sample became a molecule or a crystal, or another crystal.
     sampleChanged = Signal()
     kpointsChanged = Signal()
+    engineOptionsChanged = Signal()
+    # The line on how frequencies are computed may read differently; PyBackend also emits it.
+    frequenciesNoteChanged = Signal()
+    # Something the user should know about a change they made, which is kept.
+    warning = Signal(str)
 
     def __init__(
         self,
         adapters: Optional[list[EngineAdapter]] = None,
         settings: Optional[QSettings] = None,
+        calculations=None,
         parent=None,
     ):
         super().__init__(parent)
-        # In card order; the first that can run the sample is the active one.
-        self._adapters = adapters if adapters is not None else [OrcaAdapter(), QuantumEspressoAdapter()]
+        # In card order: the first usable one is active when nothing else decides.
+        self._adapters = adapters if adapters is not None else [OrcaAdapter(), QuantumEspressoAdapter(), CastepAdapter()]
         self._run = RunSettings()
-        # The configured executables are machine settings, not project ones.
+        # The configured executables and the preferred engines are machine settings, not project ones.
         self._settings = settings if settings is not None else QSettings('EasyScience', 'EasyQM')
         for adapter in self._adapters:
             adapter.executable = self._settings.value(_settings_key(adapter), '') or None
         self._infos = [adapter.detect() for adapter in self._adapters]
         self._methods = [adapter.default_method() for adapter in self._adapters]
-        self._active = 0
+        self._calculations = calculations  # logic.calculations.Calculations, for the frequencies note
         self._cell = None  # the sample's unit cell, set by PyBackend; None for a molecule
+        self._elements: list[str] = []
+        self._active = 0
+        self._active = self._choose_engine()
+        self._options = self.adapter.engine_options(self._elements)
+        for signal in (self.engineChanged, self.levelOfTheoryChanged, self.systemChanged, self.engineOptionsChanged):
+            signal.connect(self.frequenciesNoteChanged)
 
     # For the other backend parts (plain Python, not exposed to QML)
 
@@ -87,6 +105,7 @@ class Method(QObject):
         defaults = RunSettings()
         for field in fields(RunSettings):
             setattr(self._run, field.name, getattr(defaults, field.name))
+        self._refresh_options()
         for signal in (
             self.engineChanged,
             self.levelOfTheoryChanged,
@@ -94,21 +113,22 @@ class Method(QObject):
             self.scfChanged,
             self.runSettingsChanged,
             self.kpointsChanged,
+            self.engineOptionsChanged,
         ):
             signal.emit()
 
-    def set_sample_cell(self, cell) -> None:
-        """The sample's `logic.sample.Cell`, or None for a molecule."""
+    def set_sample(self, cell, elements: list[str]) -> None:
+        """The sample's `logic.sample.Cell` (None for a molecule) and its elements."""
         kind_changed = (cell is None) != (self._cell is None)
-        self._cell = cell
-        usable = [index for index, adapter in enumerate(self._adapters) if not adapter.system_problem(cell is not None)]
-        if usable and self._active not in usable:
-            self._active = usable[0]
-            # Everything the page shows is the new engine's.
-            for signal in (self.levelOfTheoryChanged, self.systemChanged, self.scfChanged):
-                signal.emit()
-        if kind_changed:
+        self._cell, self._elements = cell, list(elements)
+        if kind_changed or self.adapter.system_problem(self.periodic):
+            active = self._choose_engine()
+            if active != self._active:
+                self._active = active
+                self._engine_switched()
+                return
             self.engineChanged.emit()  # the active card, and why the others are grey
+        self._refresh_options()
         self.sampleChanged.emit()
         self.kpointsChanged.emit()
 
@@ -116,7 +136,57 @@ class Method(QObject):
     def _capabilities(self):
         return self.adapter.capabilities()
 
+    def _choose_engine(self) -> int:
+        """The engine for a new kind of sample (the rules in the module docstring)."""
+        usable = [i for i, adapter in enumerate(self._adapters) if not adapter.system_problem(self.periodic)]
+        if not usable:
+            return self._active
+        names = [self._adapters[i].name for i in usable]
+        preferred = self._settings.value(self._preference_key, '')
+        preferred = usable[names.index(preferred)] if preferred in names else None
+        found = [i for i in usable if self._infos[i].found]
+        if preferred is not None and self._infos[preferred].found:
+            return preferred
+        if found:
+            return found[0]
+        return preferred if preferred is not None else usable[0]
+
+    @property
+    def _preference_key(self) -> str:
+        return f'engines/preferred/{"crystal" if self.periodic else "molecule"}'
+
+    def _engine_switched(self) -> None:
+        """Everything the page shows is the new engine's."""
+        self._refresh_options()
+        for signal in (self.engineChanged, self.levelOfTheoryChanged, self.systemChanged, self.scfChanged,
+                       self.sampleChanged, self.kpointsChanged):
+            signal.emit()
+
+    def _refresh_options(self) -> None:
+        """The active engine's options for the sample; a value no longer offered goes back to the default."""
+        self._options = self.adapter.engine_options(self._elements)
+        values = self.logic.engine_options
+        for option in self._options:
+            allowed = [value for value, _ in option.choices]
+            if option.name in values and values[option.name] not in allowed:
+                del values[option.name]
+                self.warning.emit(f'{option.label}: the previous choice is not available for this sample, so '
+                                  f'{dict(option.choices)[option.default]} is used.')
+        self.engineOptionsChanged.emit()
+
     # Engines
+
+    @Slot(str)
+    def setEngine(self, name: str) -> None:
+        """Make this engine active and preferred for this kind of sample, found or not; refused
+        for an engine that cannot run the sample."""
+        index = next((i for i, adapter in enumerate(self._adapters) if adapter.name == name), None)
+        if index is None or self._adapters[index].system_problem(self.periodic):
+            return
+        self._settings.setValue(self._preference_key, name)
+        if index != self._active:
+            self._active = index
+            self._engine_switched()
 
     @Property('QVariantList', notify=engineChanged)
     def engines(self) -> list:
@@ -160,7 +230,7 @@ class Method(QObject):
     @Property(str, notify=engineChanged)
     def engineExecutableFilter(self) -> str:
         """File dialog filter for the active engine's executable, e.g. 'ORCA executable (orca orca.exe)'."""
-        names = dict.fromkeys(name for program in self.adapter.programs for name in (program, f'{Path(program).stem}.exe'))
+        names = dict.fromkeys(name for program in self.adapter.programs for name in (program, _windows_name(program)))
         return f'{self.adapter.name} executable ({" ".join(names)})'
 
     @Slot()
@@ -363,6 +433,37 @@ class Method(QObject):
     def stabilityCheckOffered(self) -> bool:
         return self._capabilities.stability_check
 
+    # Engine-specific options and notes
+
+    @Property('QVariantList', notify=engineOptionsChanged)
+    def engineOptions(self) -> list:
+        """[{name, label, choices, value, tooltip}] of the active engine, for this sample."""
+        values = self.logic.engine_options
+        return [{'name': option.name, 'label': option.label, 'choices': choices(option.choices),
+                 'value': values.get(option.name, option.default), 'tooltip': option.tooltip}
+                for option in self._options]
+
+    @Slot(str, str)
+    def setEngineOption(self, name: str, value: str) -> None:
+        option = next((option for option in self._options if option.name == name), None)
+        if option is None or value not in dict(option.choices):
+            return
+        if self.logic.engine_options.get(name, option.default) == value:
+            return
+        self.logic.engine_options[name] = value
+        self.engineOptionsChanged.emit()
+        if self._calculations is not None:
+            text = self.adapter.option_warning(name, value, self._calculations, self.logic)
+            if text:
+                self.warning.emit(text)
+
+    @Property(str, notify=frequenciesNoteChanged)
+    def frequenciesNote(self) -> str:
+        """How the active engine will compute the frequencies with this method, or ''."""
+        if self._calculations is None or not self.periodic:
+            return ''
+        return self.adapter.frequencies_note(self._calculations, self.logic)
+
     # Run settings
 
     @Property(int, notify=runSettingsChanged)
@@ -386,10 +487,15 @@ def _settings_key(adapter: EngineAdapter) -> str:
     return f'engines/{adapter.name}/executable'
 
 
+def _windows_name(program: str) -> str:
+    """The program's file name on Windows: castep.serial.exe, and pw.exe for the Unix-style pw.x."""
+    return (program[:-2] if program.endswith('.x') else program) + '.exe'
+
+
 def _card_text(info) -> str:
     """Card subtitle: version line when found, otherwise why the card is grey."""
     if not info.found:
-        return 'Not detected · add the executable to PATH or configure its path'
+        return info.detail or 'Not detected · add the executable to PATH or configure its path'
     parts = [f'Version {info.version}' if info.version else 'Version unknown']
     if info.detail:
         parts.append(info.detail)

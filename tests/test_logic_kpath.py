@@ -107,3 +107,16 @@ def test_a_conventional_cell_of_a_centred_lattice_folds_its_bands():
     unknown = Cell.from_parameters(5.43, 5.43, 5.43, 90, 90, 90)  # edited: no space group
     assert folded_reason(unknown, band_path(unknown)) == ''
     assert folded_reason(Cell.from_parameters(3, 3, 5, 90, 90, 120, 'P63/mmc'), band_path(unknown)) == ''
+
+
+def test_the_atoms_tell_a_conventional_cell_from_a_supercell():
+    cubic = Cell.from_parameters(5.43, 5.43, 5.43, 90, 90, 90)  # no group from a file
+    path = band_path(cubic)
+    assert 'conventional cell of a centred lattice (Fd-3m)' in folded_reason(cubic, path, 4, 'Fd-3m')
+    assert 'holds 2 primitive cells' in folded_reason(Cell.from_parameters(5.43, 5.43, 10.86, 90, 90, 90),
+                                                      path, 2, 'P4/mmm')  # 2 × 1 × 1 of a simple cell
+    assert 'holds 32 primitive cells' in folded_reason(cubic, path, 32, 'Fd-3m')  # 2 × 2 × 2 of the conventional
+    assert folded_reason(cubic, path, 1, 'Pm-3m') == ''
+    primitive = Cell(((0, 2.7, 2.7), (2.7, 0, 2.7), (2.7, 2.7, 0)))
+    assert folded_reason(primitive, band_path(primitive), 1, 'Fd-3m') == ''
+    assert 'holds 8 primitive cells' in folded_reason(primitive, band_path(primitive), 8, 'Fd-3m')

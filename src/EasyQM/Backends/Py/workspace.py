@@ -462,7 +462,9 @@ class Workspace:
         }
 
     def _configuration(self) -> dict:
-        return configuration(self._sample.logic, self._calculations.logic, self._method.logic, self._method.run_settings)
+        method = self._method
+        return configuration(self._sample.logic, self._calculations.logic, method.logic, method.run_settings,
+                             method.engineName)
 
     def _examples(self) -> list[Path]:
         folders = [STRUCTURES_DIR, EXAMPLES_DIR / 'XYZ', EXAMPLES_DIR / 'CIF']
@@ -860,8 +862,8 @@ class Workspace:
         if group == 'geometry_optimisation' and proposed['optimise'] == 'positions_and_cell' and not self._sample.periodic:
             return 'Optimising the cell needs a crystal.'
         if group == 'vibrational_frequencies' and proposed['raman']:
-            if self._method.adapter.name == 'Quantum ESPRESSO':
-                return 'Quantum ESPRESSO does not compute Raman activities here.'
+            if not self._method.adapter.raman:
+                return f'{self._method.adapter.name} does not compute Raman activities here.'
             if proposed['type'] != 'numerical':
                 return 'Raman activities need type numerical.'
         if group == 'excited_states':

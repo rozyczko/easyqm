@@ -1,0 +1,154 @@
+==> job: Ground state
+ | Welcome to Academic Release CASTEP version 26.11|
+ type of calculation                            : geometry optimization
+ Method: Treating system as metallic with density mixing treatment of electrons,
+Final energy, E             =  -339.9715554804     eV
+Final free energy (E-TS)    =  -339.9766392394     eV
+NB est. 0K energy (E-0.5TS)      =  -339.9740973599     eV
+Final energy, E             =  -340.0261042986     eV
+Final free energy (E-TS)    =  -340.0312454894     eV
+NB est. 0K energy (E-0.5TS)      =  -340.0286748940     eV
+Final energy, E             =  -340.0508917405     eV
+Final free energy (E-TS)    =  -340.0561361286     eV
+NB est. 0K energy (E-0.5TS)      =  -340.0535139346     eV
+ LBFGS: finished iteration     0 with enthalpy= -3.40067732E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   0.000000E+000 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   1.027046E+000 |   5.000000E-002 |       eV/A | No  | <-- LBFGS
+ |  |dR|max  |   0.000000E+000 |   1.000000E-003 |          A | No  | <-- LBFGS
+ |   Smax    |   7.228591E+000 |   1.000000E-001 |        GPa | No  | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.0723355821     eV
+Final free energy (E-TS)    =  -340.0762858659     eV
+NB est. 0K energy (E-0.5TS)      =  -340.0743107240     eV
+Final energy, E             =  -340.1548096633     eV
+Final free energy (E-TS)    =  -340.1556635226     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1552365930     eV
+ LBFGS: finished iteration     1 with enthalpy= -3.40152592E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   4.242989E-002 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   2.726268E-001 |   5.000000E-002 |       eV/A | No  | <-- LBFGS
+ |  |dR|max  |   1.982443E-002 |   1.000000E-003 |          A | No  | <-- LBFGS
+ |   Smax    |   1.462558E+000 |   1.000000E-001 |        GPa | No  | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.1595764893     eV
+Final free energy (E-TS)    =  -340.1601124157     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1598444525     eV
+Final energy, E             =  -340.1451058697     eV
+Final free energy (E-TS)    =  -340.1454803135     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1452930916     eV
+ LBFGS: finished iteration     2 with enthalpy= -3.40144111E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   4.240240E-003 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   6.291468E-002 |   5.000000E-002 |       eV/A | No  | <-- LBFGS
+ |  |dR|max  |   7.483462E-003 |   1.000000E-003 |          A | No  | <-- LBFGS
+ |   Smax    |   1.794931E+000 |   1.000000E-001 |        GPa | No  | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.1439009579     eV
+Final free energy (E-TS)    =  -340.1442626708     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1440818143     eV
+Final energy, E             =  -340.1561395186     eV
+Final free energy (E-TS)    =  -340.1564708029     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1563051607     eV
+ LBFGS: finished iteration     3 with enthalpy= -3.40153726E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   4.807302E-003 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   2.155194E-001 |   5.000000E-002 |       eV/A | No  | <-- LBFGS
+ |  |dR|max  |   2.569228E-003 |   1.000000E-003 |          A | No  | <-- LBFGS
+ |   Smax    |   7.691962E-001 |   1.000000E-001 |        GPa | No  | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.1552433823     eV
+Final free energy (E-TS)    =  -340.1555068900     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1553751361     eV
+ LBFGS: finished iteration     4 with enthalpy= -3.40155138E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   7.061951E-004 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   1.042849E-001 |   5.000000E-002 |       eV/A | No  | <-- LBFGS
+ |  |dR|max  |   4.111337E-003 |   1.000000E-003 |          A | No  | <-- LBFGS
+ |   Smax    |   2.433595E-001 |   1.000000E-001 |        GPa | No  | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.1554452440     eV
+Final free energy (E-TS)    =  -340.1557130188     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1555791314     eV
+Final energy, E             =  -340.1560780609     eV
+Final free energy (E-TS)    =  -340.1563529314     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1562154961     eV
+ LBFGS: finished iteration     5 with enthalpy= -3.40153009E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   1.064798E-003 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   5.329980E-002 |   5.000000E-002 |       eV/A | No  | <-- LBFGS
+ |  |dR|max  |   3.225213E-003 |   1.000000E-003 |          A | No  | <-- LBFGS
+ |   Smax    |   4.836555E-001 |   1.000000E-001 |        GPa | No  | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.1565018313     eV
+Final free energy (E-TS)    =  -340.1567837675     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1566427994     eV
+Final energy, E             =  -340.1555402341     eV
+Final free energy (E-TS)    =  -340.1558982712     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1557192526     eV
+ LBFGS: finished iteration     6 with enthalpy= -3.40154415E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   7.030779E-004 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   8.052032E-003 |   5.000000E-002 |       eV/A | Yes | <-- LBFGS
+ |  |dR|max  |   2.856652E-003 |   1.000000E-003 |          A | No  | <-- LBFGS
+ |   Smax    |   9.182700E-002 |   1.000000E-001 |        GPa | Yes | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.1561719293     eV
+Final free energy (E-TS)    =  -340.1565368960     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1563544127     eV
+ LBFGS: finished iteration     7 with enthalpy= -3.40154703E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   1.439774E-004 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   1.192993E-002 |   5.000000E-002 |       eV/A | Yes | <-- LBFGS
+ |  |dR|max  |   1.462320E-004 |   1.000000E-003 |          A | Yes | <-- LBFGS
+ |   Smax    |   5.478198E-002 |   1.000000E-001 |        GPa | Yes | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.1557823826     eV
+Final free energy (E-TS)    =  -340.1561445016     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1559634421     eV
+ LBFGS: finished iteration     8 with enthalpy= -3.40154894E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   9.580872E-005 |   2.000000E-005 |         eV | No  | <-- LBFGS
+ |  |F|max   |   1.276139E-002 |   5.000000E-002 |       eV/A | Yes | <-- LBFGS
+ |  |dR|max  |   1.673031E-004 |   1.000000E-003 |          A | Yes | <-- LBFGS
+ |   Smax    |   4.180594E-002 |   1.000000E-001 |        GPa | Yes | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+Final energy, E             =  -340.1557854434     eV
+Final free energy (E-TS)    =  -340.1561480492     eV
+NB est. 0K energy (E-0.5TS)      =  -340.1559667463     eV
+ LBFGS: finished iteration     9 with enthalpy= -3.40154897E+002 eV
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ | Parameter |      value      |    tolerance    |    units   | OK? | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ |  dE/ion   |   1.478516E-006 |   2.000000E-005 |         eV | Yes | <-- LBFGS
+ |  |F|max   |   1.139764E-002 |   5.000000E-002 |       eV/A | Yes | <-- LBFGS
+ |  |dR|max  |   5.942095E-005 |   1.000000E-003 |          A | Yes | <-- LBFGS
+ |   Smax    |   3.954695E-002 |   1.000000E-001 |        GPa | Yes | <-- LBFGS
+ +-----------+-----------------+-----------------+------------+-----+ <-- LBFGS
+ LBFGS: Geometry optimization completed successfully.
+ LBFGS: Final Configuration:
+ LBFGS: Final Enthalpy     = -3.40154897E+002 eV
+Total time          =     10.67 s
+==> job-bands: Band structure
+ | Welcome to Academic Release CASTEP version 26.11|
+ type of calculation                            : Electronic Spectroscopy
+ Method: Treating system as metallic with density mixing treatment of electrons,
+Total time          =      4.84 s

@@ -1,0 +1,78 @@
+==> job: Ground state
+ | Welcome to Academic Release CASTEP version 26.11|
+ type of calculation                            : geometry optimization
+ Method: Treating system as non-metallic,
+Final energy =  -440.7949612018     eV
+WARNING - there is nothing to optimise - skipping relaxation
+Total time          =      3.17 s
+==> job-phonon: Vibrational frequencies
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ | Welcome to Academic Release CASTEP version 26.11|
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ +-------------------------------------------------+
+ type of calculation                            : Phonon followed by E-field
+ Method: Treating system as non-metallic,
+ +                           Vibrational Frequencies                          +
+ +                           -----------------------                          +
+ +                                                                            +
+ + Performing frequency calculation at  1 wavevector  (q-pt )                 +
+ + ========================================================================== +
+ +                                                                            +
+ + -------------------------------------------------------------------------- +
+ +  q-pt=    1 (  0.000000  0.000000  0.000000)     1.0000000000              +
+ + -------------------------------------------------------------------------- +
+ +  Acoustic sum rule correction <  69.813111 cm-1 applied                    +
+ +     N      Frequency irrep.    ir intensity active            raman active + 
+ +                (cm-1)         ((D/A)**2/amu)                               + 
+ +                                                                            +
+ +     1      -0.026685   a          0.0000000  N                       N     + 
+ +     2      -0.026685   a          0.0000000  N                       N     + 
+ +     3      -0.026685   a          0.0000000  N                       N     + 
+ +     4     551.670642   b          0.0000000  N                       Y     + 
+ +     5     551.670642   b          0.0000000  N                       Y     + 
+ +     6     551.670642   b          0.0000000  N                       Y     + 
+ + .......................................................................... +
+ +    Character from group theory analysis of analytic part of eigenvectors   +
+ +                           Space Group = 227,       Fd-3m                   +
+ + .......................................................................... +
+ +  Rep  Mul |    E   4   2  2'   3   I  -4 m_h m_v  -3                       +
+ +           | ----------------------------------------                       +
+ + a T1u   1 |    3   1  -1  -1   0  -3  -1   1   1   0                       +
+ + b T2g   1 |    3  -1  -1   1   0   3  -1  -1   1   0                       +
+ + -------------------------------------------------------------------------- +
+ +  q-pt=    1 (  0.000000  0.000000  0.000000)     0.0000000000              +
+ +  q->0 along (  0.000000  0.000000  1.000000)                               +
+ + -------------------------------------------------------------------------- +
+ +  Acoustic sum rule correction <  69.813111 cm-1 applied                    +
+ +     N      Frequency irrep.    ir intensity active            raman active + 
+ +                (cm-1)         ((D/A)**2/amu)                               + 
+ +                                                                            +
+ +     1      -0.026685   a          0.0000000  N                       N     + 
+ +     2      -0.026685   a          0.0000000  N                       N     + 
+ +     3      -0.026685   a          0.0000000  N                       N     + 
+ +     4     551.670642   b          0.0000000  N                       Y     + 
+ +     5     551.670642   b          0.0000000  N                       Y     + 
+ +     6     551.670642   b          0.0000000  N                       Y     + 
+ + .......................................................................... +
+ +    Character from group theory analysis of analytic part of eigenvectors   +
+ +                           Space Group = 227,       Fd-3m                   +
+ + .......................................................................... +
+ +  Rep  Mul |    E   4   2  2'   3   I  -4 m_h m_v  -3                       +
+ +           | ----------------------------------------                       +
+ + a T1u   1 |    3   1  -1  -1   0  -3  -1   1   1   0                       +
+ + b T2g   1 |    3  -1  -1   1   0   3  -1  -1   1   0                       +
+Total time          =      4.02 s
+==> job-bands: Band structure
+ | Welcome to Academic Release CASTEP version 26.11|
+ type of calculation                            : Electronic Spectroscopy
+ Method: Treating system as non-metallic,
+Total time          =      4.78 s
+==> job-dos: Density of states
+ | Welcome to Academic Release CASTEP version 26.11|
+ type of calculation                            : Electronic Spectroscopy
+ Method: Treating system as non-metallic,
+Total time          =      2.77 s

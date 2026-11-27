@@ -41,9 +41,9 @@ SCRATCH_ROOT = Path(tempfile.gettempdir()) / 'EasyQM'
 _log = logging.getLogger(__name__)
 
 
-def configuration(sample, calculations, method, settings) -> dict:
+def configuration(sample, calculations, method, settings, engine: str) -> dict:
     """Short hashes of what a job is computed from, to tell whether results belong to the
-    current setup: {'sample', 'calculations', 'method'}."""
+    current setup: {'sample', 'calculations', 'method'}; the engine counts as method."""
     sample_state = {
         'atoms': [(a.element, round(a.x, 4), round(a.y, 4), round(a.z, 4), a.fixed) for a in sample.atoms],
         'cell': sample.cell.vectors if sample.cell else None,
@@ -53,7 +53,7 @@ def configuration(sample, calculations, method, settings) -> dict:
         'steps': [step.value for step in calculations.workflow()],
         'options': [asdict(getattr(calculations, calculation.value)) for calculation in CalculationType],
     }
-    method_state = {'method': asdict(method), 'settings': asdict(settings)}
+    method_state = {'engine': engine, 'method': asdict(method), 'settings': asdict(settings)}
     return {name: _digest(state) for name, state in
             (('sample', sample_state), ('calculations', calculations_state), ('method', method_state))}
 
@@ -191,17 +191,18 @@ class Job(QObject):
         if self.running:
             return
         self._steps, self._step, self._step_failed = [], 0, False
+        adapter = self._adapter
         try:
-            files, commands = self._prepare()
+            files, steps = self._prepare()
             folder = new_run_folder(self.runs_root)
             for name, text in files.items():
                 (folder / name).write_text(text, encoding='utf-8')
             input_path = folder / next(iter(files))
-            output_path = folder / self._adapter.output_file_name
+            output_path = folder / adapter.output_file_name
             self._set_files(folder, input_path, output_path)
             self._clear_output()
-            self._job_adapter = self._adapter
-            self._runner.start(commands, folder, output_path)
+            self._job_adapter = adapter
+            self._runner.start(steps, folder, output_path, adapter.environment(self._settings), adapter.step_succeeded)
             self._steps = self._calculations.workflow()
         except Exception as error:
             self._set_state(JobState.FAILED, _problem(error))
@@ -209,15 +210,15 @@ class Job(QObject):
         self._record = {
             'run_id': folder.name,
             'folder': str(folder),
-            'engine': self._adapter.name,
-            'method': describe(self._method, self._adapter.capabilities()),
+            'engine': adapter.name,
+            'method': describe(self._method, adapter.capabilities()),
             'calculations': [info(step).name for step in self._steps],
-            'configuration': configuration(self._sample, self._calculations, self._method, self._settings),
+            'configuration': configuration(self._sample, self._calculations, self._method, self._settings, adapter.name),
             'geometry_applied': False,
         }
         self._started = time.monotonic()
         self._stopping = False
-        self._set_state(JobState.RUNNING, f'Running {self._adapter.name}, serial')
+        self._set_state(JobState.RUNNING, f'Running {adapter.name}, serial')
         self._timer.start()
 
     def preflight(self) -> str:
@@ -237,7 +238,7 @@ class Job(QObject):
         if not self._executable:
             raise RuntimeError(f'{self._adapter.name} was not found. Configure its path first.')
         files = self._adapter.input_files(self._sample, self._calculations, self._method, self._settings)
-        return files, self._adapter.commands(self._executable, list(files))
+        return files, self._adapter.steps(self._executable, list(files))
 
     # Provenance and output, for the assistant
 
@@ -306,7 +307,12 @@ class Job(QObject):
         elif code == 0 and self._job_adapter.succeeded(self.output):
             self._set_state(JobState.COMPLETED, f'Completed in {elapsed}')
         else:
-            message = f'{self._job_adapter.name} ended with exit code {code} after {elapsed}; see the output'
+            name, reason = self._job_adapter.name, self._job_adapter.failure_reason(self.output)
+            if reason:
+                step = f' in {info(self._steps[self._step]).name}' if self._steps else ''
+                message = f'{name} failed{step} after {elapsed}: {reason}'
+            else:
+                message = f'{name} ended with exit code {code} after {elapsed}; see the output'
             self._set_state(JobState.FAILED, message)
 
     def _append(self, text: str) -> None:

@@ -193,6 +193,13 @@ class Sample:
 
         return space_group(self.atoms, self.cell) if self.periodic else None
 
+    def primitive_count(self) -> int:
+        """How many primitive cells a crystal's cell holds (`logic.symmetry.primitive_count`);
+        0 for a molecule, or when none is found."""
+        from .symmetry import primitive_count
+
+        return primitive_count(self.atoms, self.cell) if self.periodic else 0
+
     def space_group_warning(self, found) -> str:
         """Why the file's space group is not that of the atoms (`found`, a `SpaceGroup` or None),
         or '' when they agree, or when there is no file's group left to compare with."""

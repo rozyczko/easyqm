@@ -13,7 +13,6 @@ from Backends.Py.logic.calculations import Calculations
 from Backends.Py.logic.calculations import CalculationType
 from Backends.Py.logic.engines import base
 from Backends.Py.logic.engines import quantum_espresso
-from Backends.Py.logic.engines import quantum_espresso_output
 from Backends.Py.logic.engines.quantum_espresso import QuantumEspressoAdapter
 from Backends.Py.logic.engines.quantum_espresso import sibling
 from Backends.Py.logic.kpath import band_path
@@ -112,7 +111,7 @@ def test_found_with_version_and_the_pseudo_folder_beside_bin(tmp_path, monkeypat
     (tmp_path / 'QE' / 'pseudo').mkdir()
     monkeypatch.delenv('ESPRESSO_PSEUDO', raising=False)
     banner = '\n     Program PWSCF v.7.5 starts on  1Nov2026 at 17: 6:10 \n'
-    monkeypatch.setattr(base.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=banner))
+    monkeypatch.setattr(base.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=banner, returncode=0))
 
     adapter = QuantumEspressoAdapter(str(executable))
     info = adapter.detect()
@@ -129,7 +128,7 @@ def test_espresso_pseudo_wins_and_a_missing_program_is_not_found(tmp_path, monke
     executable = tmp_path / 'pw.x'
     executable.write_text('', encoding='utf-8')
     monkeypatch.setenv('ESPRESSO_PSEUDO', str(tmp_path))
-    monkeypatch.setattr(base.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=''))
+    monkeypatch.setattr(base.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout='', returncode=0))
     adapter = QuantumEspressoAdapter(str(executable))
     assert adapter.detect().version == '' and adapter.pseudo_folder == tmp_path
 
@@ -313,12 +312,6 @@ def test_reads_a_single_point():
 def test_reads_band_edges_per_spin_channel():
     results = QuantumEspressoAdapter().parse(SI_SPIN_SCF.read_text(encoding='utf-8'))
     assert (results.homo, results.lumo, results.fermi_energy) == (6.2528, 6.9439, 6.6820)
-
-
-def test_a_ground_state_without_printed_levels_leaves_the_edges_to_later_runs():
-    # Spin-polarised, with too many k-points for pw.x to print: one empty channel.
-    sources = [([[]], [1, 1]), ([[[0.0, 2.0]], [[0.1, 2.1]]], [1, 1])]
-    assert quantum_espresso_output._band_edges(sources) == (0.1, 2.0)
 
 
 def test_a_partly_filled_band_is_a_metal():
@@ -526,6 +519,30 @@ def test_reads_bands_and_dos_together_with_spin():
     energies = [-30 + 0.01 * i for i in range(6000)]
     # One electron per band and channel, the weights of each channel summing to 1.
     assert sum(results.density_of_states.curve(energies, 0.1)) * 0.01 == pytest.approx(2 * 24, rel=1e-4)
+
+
+def test_a_band_run_without_empty_bands_keeps_the_ground_state_gap():
+    kpoints = _si_path()
+    band_run = pw_run(kpoints, [[_model_levels(k)[:16] for k in kpoints]])  # Empty bands = 0
+    results = QuantumEspressoAdapter().parse(SI_SCF.read_text(encoding='utf-8') + band_run)
+    assert (results.homo, results.lumo) == (6.2527, 6.9439)
+    assert results.band_structure.edges() is None and results.band_structure.without_empty_bands
+    # Its filled bands still bound the valence band maximum.
+    above = pw_run(kpoints, [[[level + 1 for level in _model_levels(k)[:16]] for k in kpoints]])
+    assert QuantumEspressoAdapter().parse(SI_SCF.read_text(encoding='utf-8') + above).homo == pytest.approx(6.5)
+
+
+def test_the_path_is_named_from_the_cell_the_bands_input_was_written_for():
+    # A cubic cell relaxed (vc-relax) to tetragonal, c 2 % longer: the bands run prints that cell.
+    # Named from it, R (½, ½, ½) would be the tetragonal A.
+    stretch = 1.02
+    kpoints = [(x, y, z / stretch) for x, y, z in _si_path()]  # the same fractions on the relaxed cell
+    band_run = pw_run(kpoints, [[_model_levels(k) for k in kpoints]], axes=((1, 0, 0), (0, 1, 0), (0, 0, stretch)))
+
+    bands = QuantumEspressoAdapter().parse(SI_SCF.read_text(encoding='utf-8') + band_run).band_structure
+
+    assert bands.lattice == 'Simple cubic'
+    assert [name for _, name in bands.ticks] == ['Γ', 'X', 'M', 'Γ', 'R', 'X|M', 'R']
 
 
 def test_a_partly_filled_band_along_the_path_is_a_metal():

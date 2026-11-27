@@ -22,7 +22,8 @@ SPEECH_MODEL = 'base.en'
 SPEECH_MODEL_MB = 140
 WHISPER_RATE = 16000  # Hz, the sample rate Whisper takes
 # Terms of the application's own that no choice list holds.
-_TERMS = ('EasyQM', 'ORCA', 'Quantum ESPRESSO', 'basis set', 'Hartree-Fock', 'DFT', 'TD-DFT', 'TDA', 'EOM-CCSD',
+_TERMS = ('EasyQM', 'ORCA', 'Quantum ESPRESSO', 'CASTEP', 'pseudopotentials', 'basis set', 'Hartree-Fock', 'DFT',
+          'TD-DFT', 'TDA', 'EOM-CCSD',
           'roots', 'SCF', 'HOMO', 'LUMO', 'Z-matrix', 'k-points', 'singlet', 'doublet', 'triplet', 'multiplicity')
 _SCALE = {'uint8': 128.0, 'int16': 32768.0, 'int32': 2147483648.0, 'float': 1.0}
 _DTYPE = {'uint8': np.uint8, 'int16': np.int16, 'int32': np.int32, 'float': np.float32}
