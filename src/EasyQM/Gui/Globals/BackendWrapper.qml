@@ -60,8 +60,14 @@ QtObject {
     readonly property string sampleSummary: activeBackend.sample.summary
     readonly property int sampleAtomCount: activeBackend.sample.atomCount
     readonly property bool samplePeriodic: activeBackend.sample.periodic
-    // {a, b, c, alpha, beta, gamma, volume, spaceGroup, vectors}; empty for a molecule
+    // {a, b, c, alpha, beta, gamma, volume, spaceGroup, spaceGroupNumber, fileSpaceGroup,
+    // vectors}; empty for a molecule. spaceGroup is found from the atoms (spglib),
+    // fileSpaceGroup is the one the file gives, until the first edit
     readonly property var sampleCell: activeBackend.sample.cell
+    // Why the file's space group differs from the atoms'; '' when they agree
+    readonly property string sampleSpaceGroupWarning: activeBackend.sample.spaceGroupWarning
+    // Å, within which spglib takes atoms to be on symmetric positions
+    readonly property real sampleSpaceGroupTolerance: activeBackend.sample.spaceGroupTolerance
     // Schoenflies symbol of a molecule; empty for a crystal or above samplePointGroupAtomLimit atoms
     readonly property string samplePointGroup: activeBackend.sample.pointGroup
     readonly property int samplePointGroupAtomLimit: activeBackend.sample.pointGroupAtomLimit
@@ -82,6 +88,10 @@ QtObject {
     // Text that is not a number, or makes no cell, changes nothing.
     function sampleSetAtomCoordinate(index, axis, text) { activeBackend.sample.setAtomCoordinate(index, axis, text) }
     function sampleSetCellParameter(name, text) { activeBackend.sample.setCellParameter(name, text) }
+    // Replace a crystal's cell by na × nb × nc of them, each 1 to sampleSupercellMax; refused
+    // above sampleSceneAtomLimit atoms
+    readonly property int sampleSupercellMax: activeBackend.sample.supercellMax
+    function sampleMakeSupercell(na, nb, nc) { activeBackend.sample.makeSupercell(na, nb, nc) }
     // Cartesian x, y, z in Å, from the viewer's atom mover
     function sampleSetAtomPosition(index, x, y, z) { activeBackend.sample.setAtomPosition(index, x, y, z) }
     // A carbon at the origin (fractional [0, 0, 0] in a crystal), then selected; removing
@@ -173,6 +183,20 @@ QtObject {
     function calculationsSetExcVirtualOrbitals(value) { activeBackend.calculations.setExcVirtualOrbitals(value) }
     readonly property bool calculationsExcFrozenCore: activeBackend.calculations.excFrozenCore
     function calculationsSetExcFrozenCore(value) { activeBackend.calculations.setExcFrozenCore(value) }
+
+    // The path follows the lattice of the sample's cell, taken as the primitive cell
+    readonly property string calculationsBandsLattice: activeBackend.calculations.bandsLattice
+    readonly property string calculationsBandsPath: activeBackend.calculations.bandsPath
+    // Why the cell's bands come folded (a conventional cell of a centred lattice); '' otherwise
+    readonly property string calculationsBandsFoldedReason: activeBackend.calculations.bandsFoldedReason
+    readonly property int calculationsBandsPoints: activeBackend.calculations.bandsPoints
+    function calculationsSetBandsPoints(value) { activeBackend.calculations.setBandsPoints(value) }
+    readonly property int calculationsBandsEmptyBands: activeBackend.calculations.bandsEmptyBands
+    function calculationsSetBandsEmptyBands(value) { activeBackend.calculations.setBandsEmptyBands(value) }
+    readonly property int calculationsDosGridFactor: activeBackend.calculations.dosGridFactor
+    function calculationsSetDosGridFactor(value) { activeBackend.calculations.setDosGridFactor(value) }
+    readonly property int calculationsDosEmptyBands: activeBackend.calculations.dosEmptyBands
+    function calculationsSetDosEmptyBands(value) { activeBackend.calculations.setDosEmptyBands(value) }
 
     //////////////
     // Method page
@@ -273,6 +297,18 @@ QtObject {
     readonly property string resultsExcitedStatesMethod: activeBackend.results.excitedStatesMethod
     readonly property bool resultsHasOscillatorStrengths: activeBackend.results.hasOscillatorStrengths
     readonly property var resultsExcitations: activeBackend.results.excitations
+    // Band structure and DOS card; energies in eV from resultsEnergyReference ('VBM', 'E_F' or '')
+    readonly property bool resultsHasBandStructure: activeBackend.results.hasBandStructure
+    readonly property bool resultsHasDensityOfStates: activeBackend.results.hasDensityOfStates
+    readonly property string resultsEnergyReference: activeBackend.results.energyReference
+    readonly property var resultsEnergyWindow: activeBackend.results.energyWindow  // {min, max}
+    // {lattice, distances, starts, ticks: [{x, label}], levels: [channel][k][band]}
+    readonly property var resultsBandStructure: activeBackend.results.bandStructure
+    readonly property string resultsBandGapText: activeBackend.results.bandGapText
+    readonly property var resultsDensityOfStates: activeBackend.results.densityOfStates  // {energies, values, max}
+    readonly property int resultsDosKpoints: activeBackend.results.dosKpoints
+    readonly property real resultsDosBroadening: activeBackend.results.dosBroadening
+    function resultsSetDosBroadening(value) { activeBackend.results.setDosBroadening(value) }
 
     /////////////////////////////////////////////
     // Assistant panel (toggled from the app bar)
@@ -303,6 +339,21 @@ QtObject {
     function assistantClear() { activeBackend.assistant.clear() }
     function assistantAnswerApproval(id, allowed) { activeBackend.assistant.answerApproval(id, allowed) }
 
+    // Assistant speech: push-to-talk (the text comes as assistantVoiceTranscribed) and reading aloud
+    readonly property bool assistantVoiceInputEnabled: activeBackend.assistant.voice.inputEnabled
+    readonly property bool assistantVoiceRecognitionAvailable: activeBackend.assistant.voice.recognitionAvailable
+    readonly property string assistantVoiceModelFolder: activeBackend.assistant.voice.modelFolder
+    readonly property int assistantVoiceModelMegabytes: activeBackend.assistant.voice.modelMegabytes
+    readonly property bool assistantVoiceListening: activeBackend.assistant.voice.listening
+    readonly property bool assistantVoiceTranscribing: activeBackend.assistant.voice.transcribing
+    readonly property bool assistantVoiceSpeaking: activeBackend.assistant.voice.speaking
+    // Why nothing was transcribed, or that the speech model is loading; '' otherwise
+    readonly property string assistantVoiceMessage: activeBackend.assistant.voice.message
+    function assistantVoiceStartListening() { activeBackend.assistant.voice.startListening() }
+    function assistantVoiceStopListening() { activeBackend.assistant.voice.stopListening() }
+    function assistantVoiceCancel() { activeBackend.assistant.voice.cancel() }
+    function assistantVoiceStopSpeaking() { activeBackend.assistant.voice.stopSpeaking() }
+
     // Assistant settings (the settings dialog)
     readonly property string assistantSettingsModel: activeBackend.assistant.settings.model
     readonly property var assistantSettingsModelChoices: activeBackend.assistant.settings.modelChoices
@@ -319,6 +370,10 @@ QtObject {
     function assistantSettingsSetSendResults(value) { activeBackend.assistant.settings.setSendResults(value) }
     readonly property bool assistantSettingsOffline: activeBackend.assistant.settings.offline
     function assistantSettingsSetOffline(value) { activeBackend.assistant.settings.setOffline(value) }
+    readonly property bool assistantSettingsSpeechInput: activeBackend.assistant.settings.speechInput
+    function assistantSettingsSetSpeechInput(value) { activeBackend.assistant.settings.setSpeechInput(value) }
+    readonly property bool assistantSettingsReadAloud: activeBackend.assistant.settings.readAloud
+    function assistantSettingsSetReadAloud(value) { activeBackend.assistant.settings.setReadAloud(value) }
     // The key itself is never readable from QML
     readonly property bool assistantSettingsHasKey: activeBackend.assistant.settings.hasKey
     // 'assistant settings' | 'environment variable' | 'Anthropic CLI profile' | '' (none)
@@ -345,6 +400,7 @@ QtObject {
     signal assistantReplied()
     signal assistantNavigateRequested(string page)
     signal assistantSettingsVerified(string message)
+    signal assistantVoiceTranscribed(string text)
 
     Component.onCompleted: {
         activeBackend.project.projectSaved.connect(projectSaved)
@@ -356,6 +412,7 @@ QtObject {
         activeBackend.assistant.replied.connect(assistantReplied)
         activeBackend.assistant.navigateRequested.connect(assistantNavigateRequested)
         activeBackend.assistant.settings.verified.connect(assistantSettingsVerified)
+        activeBackend.assistant.voice.transcribed.connect(assistantVoiceTranscribed)
     }
 
 }

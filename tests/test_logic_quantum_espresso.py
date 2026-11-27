@@ -3,6 +3,7 @@
 """Quantum ESPRESSO adapter: detection, the pw.x input, and reading pw.x 7.5 outputs."""
 
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,10 +13,16 @@ from Backends.Py.logic.calculations import Calculations
 from Backends.Py.logic.calculations import CalculationType
 from Backends.Py.logic.engines import base
 from Backends.Py.logic.engines import quantum_espresso
+from Backends.Py.logic.engines import quantum_espresso_output
 from Backends.Py.logic.engines.quantum_espresso import QuantumEspressoAdapter
 from Backends.Py.logic.engines.quantum_espresso import sibling
+from Backends.Py.logic.kpath import band_path
+from Backends.Py.logic.kpath import path_kpoints
 from Backends.Py.logic.method import RunSettings
+from Backends.Py.logic.sample import Cell
 from Backends.Py.logic.sample import Sample
+from qe_runs import expand
+from qe_runs import pw_run
 
 DATA = Path(__file__).parent / 'data'
 SI_SCF = DATA / 'qe_si_scf.out'  # 8-atom cell, 2 × 2 × 2 k-points
@@ -308,6 +315,12 @@ def test_reads_band_edges_per_spin_channel():
     assert (results.homo, results.lumo, results.fermi_energy) == (6.2528, 6.9439, 6.6820)
 
 
+def test_a_ground_state_without_printed_levels_leaves_the_edges_to_later_runs():
+    # Spin-polarised, with too many k-points for pw.x to print: one empty channel.
+    sources = [([[]], [1, 1]), ([[[0.0, 2.0]], [[0.1, 2.1]]], [1, 1])]
+    assert quantum_espresso_output._band_edges(sources) == (0.1, 2.0)
+
+
 def test_a_partly_filled_band_is_a_metal():
     output = SI_SCF.read_text(encoding='utf-8').replace('electrons       =        32.00', 'electrons = 31.00')
     results = QuantumEspressoAdapter().parse(output)
@@ -357,3 +370,167 @@ def test_reads_nothing_from_an_empty_or_cut_output():
     cut = SI_RELAX.read_text(encoding='utf-8').split('ATOMIC_POSITIONS (angstrom)')[0]
     results = QuantumEspressoAdapter().parse(cut)
     assert results.optimisation is None and results.final_energy == pytest.approx(-91.28899275 / 2)
+
+
+# Band structure and density of states
+
+
+def _valence_pseudo(pseudo):
+    """Valence charges for NaCl: 4 × 9 + 4 × 7 = 64 electrons fill 32 bands."""
+    (pseudo / 'Na.paw.pbe.upf').write_text('<PP_HEADER z_valence="9.0"/>', encoding='utf-8')
+    (pseudo / 'cl_pbe_v1.uspp.F.UPF').write_text('   7.00000000000      Z valence\n', encoding='utf-8')
+
+
+def _crystal_calculations(*steps) -> Calculations:
+    calculations = Calculations()
+    calculations.set_periodic(True)
+    for step in steps:
+        calculations.set_selected(step, True)
+    return calculations
+
+
+def test_band_structure_and_dos_inputs_follow_the_ground_state(pseudo, nacl):
+    _valence_pseudo(pseudo)
+    adapter = QuantumEspressoAdapter()
+    adapter.pseudo_folder = pseudo
+    calculations = _crystal_calculations(
+        CalculationType.DENSITY_OF_STATES, CalculationType.VIBRATIONAL_FREQUENCIES, CalculationType.BAND_STRUCTURE
+    )
+
+    files = adapter.input_files(nacl, calculations, adapter.default_method(), RunSettings())
+
+    # Last, after the phonons: they overwrite the saved ground state that ph.x reads.
+    assert list(files) == ['job.in', 'ph.in', 'dynmat.in', 'bands.in', 'dos.in']
+    assert "calculation = 'scf'" in files['job.in'] and 'nbnd' not in files['job.in']
+
+    text = files['bands.in']
+    assert text.startswith('! EasyQM: NaCl (ClNa) - Band structure (Γ–X–M–Γ–R–X | M–R)\n')
+    assert "calculation = 'bands'\n  prefix = 'job'\n  outdir = './tmp'" in text and "verbosity = 'high'" in text
+    assert 'nbnd = 40\n' in text  # 32 filled and 8 empty
+    assert 'diago_full_acc = .true.' in text
+    kpoints = text.split('K_POINTS crystal_b\n')[1].splitlines()
+    assert kpoints[0] == '  8'
+    assert kpoints[1].split() == ['0.00000000', '0.00000000', '0.00000000', '13', '!', 'Γ']
+    assert kpoints[6].split()[3:] == ['1', '!', 'X']  # the jump X | M
+    assert text.count('CELL_PARAMETERS angstrom') == 1 and 'ATOMIC_POSITIONS angstrom' in text
+
+    text = files['dos.in']
+    assert "calculation = 'nscf'" in text and "occupations = 'tetrahedra'\n  nbnd = 40\n" in text
+    assert 'smearing' not in text
+    assert text.endswith('K_POINTS automatic\n  4 4 4  0 0 0\n')  # twice the 2 × 2 × 2 SCF grid
+
+
+def test_band_and_dos_options_and_spin(pseudo, nacl):
+    _valence_pseudo(pseudo)
+    adapter = QuantumEspressoAdapter()
+    adapter.pseudo_folder = pseudo
+    calculations = _crystal_calculations(CalculationType.BAND_STRUCTURE, CalculationType.DENSITY_OF_STATES)
+    calculations.band_structure.empty_bands = 2
+    calculations.density_of_states.grid_factor, calculations.density_of_states.empty_bands = 3, 0
+    method = adapter.default_method()
+    method.reference = 'UKS'
+    nacl.charge, nacl.multiplicity = 1, 2  # 63 electrons: 32 up, 31 down
+
+    files = adapter.input_files(nacl, calculations, method, RunSettings())
+
+    assert 'nbnd = 34\n' in files['bands.in'] and 'nspin = 2\n  tot_magnetization = 1' in files['bands.in']
+    assert 'nbnd = 32\n' in files['dos.in'] and files['dos.in'].endswith('  6 6 6  0 0 0\n')
+
+
+def test_band_and_dos_runs_are_pw_again(tmp_path):
+    pw = tmp_path / 'pw.exe'
+    assert QuantumEspressoAdapter().commands(str(pw), ['job.in', 'bands.in', 'dos.in']) == [
+        [str(pw), '-i', 'job.in'],
+        [str(pw), '-i', 'bands.in'],
+        [str(pw), '-i', 'dos.in'],
+    ]
+
+
+def test_current_step_of_the_band_and_dos_runs():
+    adapter = QuantumEspressoAdapter()
+    sp, bands, dos = CalculationType.SINGLE_POINT, CalculationType.BAND_STRUCTURE, CalculationType.DENSITY_OF_STATES
+    scf = SI_SCF.read_text(encoding='utf-8')
+    band_run = pw_run([(0, 0, 0)], [[[1.0, 2.0]]])
+    dos_run = pw_run([(0, 0, 0)], [[[1.0, 2.0]]], tetrahedra=True, fermi=1.5)
+    assert adapter.current_step(scf, [sp, bands, dos]) == 0
+    assert adapter.current_step(scf + band_run, [sp, bands, dos]) == 1
+    assert adapter.current_step(scf + band_run + dos_run, [sp, bands, dos]) == 2
+    assert adapter.current_step(scf + dos_run, [sp, dos]) == 1
+
+
+def _model_levels(k):
+    """16 filled and 8 empty bands; the gap is smallest at X, where |k|₁ = 0.5."""
+    x = sum(abs(c) for c in k)
+    return [-5 + 0.7 * i - x for i in range(16)] + [7 + (x - 0.5) ** 2 + 0.5 * i for i in range(8)]
+
+
+def _si_path():
+    cell = Cell.from_parameters(5.4309, 5.4309, 5.4309, 90, 90, 90, 'Fd-3m')
+    return expand(path_kpoints(cell, band_path(cell), 60))  # cubic: fractional = Cartesian in 2π/a
+
+
+def test_reads_the_band_structure_along_the_path():
+    kpoints = _si_path()
+    output = SI_SCF.read_text(encoding='utf-8') + pw_run(kpoints, [[_model_levels(k) for k in kpoints]])
+
+    results = QuantumEspressoAdapter().parse(output)
+    bands = results.band_structure
+
+    assert bands.lattice == 'Simple cubic' and len(bands.distances) == len(kpoints) == 62
+    assert [name for _, name in bands.ticks] == ['Γ', 'X', 'M', 'Γ', 'R', 'X|M', 'R']
+    assert bands.ticks[1][0] == pytest.approx(2 * math.pi / 5.4309 / 2, rel=1e-3)  # Γ–X in Å⁻¹
+    jump = bands.starts[1]
+    assert bands.starts == [0, jump] and bands.distances[jump] == bands.distances[jump - 1]
+    assert bands.filled == [16] and len(bands.levels[0][0]) == 24
+    valence, conduction = bands.edges()
+    assert (valence.energy, valence.k) == (pytest.approx(5.5), 0)  # VBM at Γ
+    assert bands.location(conduction.k) == 'X' and conduction.energy == pytest.approx(7.0)
+    assert bands.location(3) == 'Γ–X' and bands.location(jump) == 'M' and bands.location(jump - 1) == 'X'
+    # The SCF's own edges lie inside the model's, so they stay the crystal's.
+    assert (results.homo, results.lumo) == (6.2527, 6.9439) and results.density_of_states is None
+
+
+def test_reads_the_density_of_states_and_its_fermi_energy():
+    grid = [(0, 0, 0), (0, 0, -0.5), (0, -0.5, -0.5), (-0.5, -0.5, -0.5)]
+    weights = [0.25, 0.75, 0.75, 0.25]
+    dos_run = pw_run(grid, [[_model_levels(k) for k in grid]], weights=weights, fermi=6.71, tetrahedra=True)
+
+    results = QuantumEspressoAdapter().parse(SI_SCF.read_text(encoding='utf-8') + dos_run)
+    dos = results.density_of_states
+
+    assert results.band_structure is None  # alone, the run with tetrahedra is the DOS
+    assert dos.weights == weights and dos.filled == [16] and dos.fermi_energy == 6.71
+    assert results.fermi_energy == 6.71  # the denser grid's
+    energies = [-30 + 0.01 * i for i in range(6000)]
+    assert sum(dos.curve(energies, 0.1)) * 0.01 == pytest.approx(2 * 24, rel=1e-4)  # two electrons per band
+
+
+def test_reads_bands_and_dos_together_with_spin():
+    kpoints = _si_path()
+    up = [_model_levels(k) for k in kpoints]
+    down = [[level + 0.1 for level in levels] for levels in up]
+    electrons = '32.00 (up:  16.00, down:  16.00)'
+    grid = [(0, 0, 0), (0.5, 0.5, 0.5)]
+    output = (
+        SI_SPIN_SCF.read_text(encoding='utf-8')
+        + pw_run(kpoints, [up, down], electrons=electrons)
+        + pw_run(grid, [[_model_levels(k) for k in grid]] * 2, weights=[0.5, 0.5], tetrahedra=True, fermi=6.6,
+                 electrons=electrons)
+    )
+
+    results = QuantumEspressoAdapter().parse(output)
+
+    assert len(results.band_structure.levels) == 2 and results.band_structure.filled == [16, 16]
+    assert results.band_structure.levels[1][0][0] == pytest.approx(-4.9)
+    assert len(results.density_of_states.levels) == 2
+    energies = [-30 + 0.01 * i for i in range(6000)]
+    # One electron per band and channel, the weights of each channel summing to 1.
+    assert sum(results.density_of_states.curve(energies, 0.1)) * 0.01 == pytest.approx(2 * 24, rel=1e-4)
+
+
+def test_a_partly_filled_band_along_the_path_is_a_metal():
+    kpoints = _si_path()
+    band_run = pw_run(kpoints, [[_model_levels(k) for k in kpoints]], electrons='31.00')
+    results = QuantumEspressoAdapter().parse(SI_SCF.read_text(encoding='utf-8') + band_run)
+    assert results.band_structure.filled is None and results.band_structure.edges() is None
+    assert results.gap is None and results.fermi_energy == 6.6820

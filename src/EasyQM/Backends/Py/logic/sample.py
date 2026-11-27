@@ -7,6 +7,7 @@ and from CIF files by `read_cif`. A crystal holds the full content of its unit c
 symmetry is expanded on reading, and the atoms are wrapped into the cell.
 """
 
+import itertools
 import math
 import re
 from collections import Counter
@@ -54,17 +55,21 @@ class Cell:
     """A unit cell: the three lattice vectors a, b, c in Å, Cartesian, as read."""
 
     vectors: tuple[Vec, Vec, Vec]
-    space_group: str = ''  # short Hermann-Mauguin symbol, 'Fm-3m'; '' when unknown
+    # The space group the file gives, as a short Hermann-Mauguin symbol ('Fm-3m') and its
+    # number (225); '' and 0 when it gives none, or the atoms or the cell were edited since.
+    # The symmetry of the atoms themselves comes from `logic.symmetry.space_group`.
+    space_group: str = ''
+    space_group_number: int = 0
 
     @classmethod
-    def from_parameters(cls, a, b, c, alpha, beta, gamma, space_group: str = '') -> 'Cell':
+    def from_parameters(cls, a, b, c, alpha, beta, gamma, space_group: str = '', space_group_number: int = 0) -> 'Cell':
         """a along x, b in the xy plane: the setting gemmi uses for CIF coordinates."""
         cos_alpha, cos_beta, cos_gamma = (math.cos(math.radians(angle)) for angle in (alpha, beta, gamma))
         sin_gamma = math.sin(math.radians(gamma))
         cx = c * cos_beta
         cy = c * (cos_alpha - cos_beta * cos_gamma) / sin_gamma
         cz = math.sqrt(max(0.0, c * c - cx * cx - cy * cy))
-        return cls(((a, 0.0, 0.0), (b * cos_gamma, b * sin_gamma, 0.0), (cx, cy, cz)), space_group)
+        return cls(((a, 0.0, 0.0), (b * cos_gamma, b * sin_gamma, 0.0), (cx, cy, cz)), space_group, space_group_number)
 
     def with_parameters(self, a, b, c, alpha, beta, gamma) -> 'Cell':
         """A cell of these parameters, turned like this one: a keeps its direction and b stays in
@@ -166,14 +171,40 @@ class Sample:
 
     @property
     def summary(self) -> str:
-        """'benzene.xyz · C6H6 · 12 atoms'; 'NaCl.cif · ClNa · Z = 4 · 8 atoms · Fm-3m' for a crystal."""
+        """'benzene.xyz · C6H6 · 12 atoms'; 'NaCl.cif · ClNa · Z = 4 · 8 atoms · Fm-3m' for a
+        crystal, with the space group of its atoms (`space_group`)."""
+        group = self.space_group()
+        return self.summary_with(group.symbol if group else '')
+
+    def summary_with(self, space_group: str) -> str:
+        """`summary` with this space group symbol, for a caller that keeps it."""
         parts = [self.source, self.formula]
         if self.periodic:
             parts.append(f'Z = {self.formula_units}')
         parts.append(f'{self.atom_count} atoms')
         if self.periodic:
-            parts.append(self.cell.space_group)
+            parts.append(space_group)
         return ' · '.join(part for part in parts if part)
+
+    def space_group(self):
+        """The space group of a crystal's atoms (`logic.symmetry.SpaceGroup`), found by spglib;
+        None for a molecule, or when none is found."""
+        from .symmetry import space_group  # symmetry imports this module
+
+        return space_group(self.atoms, self.cell) if self.periodic else None
+
+    def space_group_warning(self, found) -> str:
+        """Why the file's space group is not that of the atoms (`found`, a `SpaceGroup` or None),
+        or '' when they agree, or when there is no file's group left to compare with."""
+        cell = self.cell
+        if cell is None or not cell.space_group:
+            return ''
+        given = f'{cell.space_group} ({cell.space_group_number})' if cell.space_group_number else cell.space_group
+        if found is None:
+            return f'The file gives {given}, but no space group was found for the atoms.'
+        if found.number == cell.space_group_number:
+            return ''
+        return f'The file gives {given}, but the atoms have {found.text}.'
 
     @property
     def fixed_count(self) -> int:
@@ -267,7 +298,7 @@ class Sample:
         if [new.element for new in atoms] != [atom.element for atom in self.atoms]:
             raise ValueError('The new positions are for other atoms.')
         if cell is not None and self.cell is not None:
-            self.cell = Cell(cell.vectors, self.cell.space_group)
+            self.cell = Cell(cell.vectors, self.cell.space_group, self.cell.space_group_number)
         for atom, new in zip(self.atoms, atoms):
             atom.x, atom.y, atom.z = new.x, new.y, new.z
         if self.cell is not None:
@@ -352,6 +383,37 @@ class Sample:
         self.cell = cell
         for atom, position in zip(self.atoms, fractional):
             atom.x, atom.y, atom.z = cell.cartesian(*position)
+
+    def make_supercell(self, na: int, nb: int, nc: int) -> None:
+        """Replace a crystal's cell by na × nb × nc of them along a, b, c, with their atoms.
+
+        The atoms come cell by cell (c fastest, then b, then a), each cell in the order of the
+        original, and are numbered anew: 'Na1' … 'Cl64'. Copies of a fixed atom are fixed. The
+        charge is that of all the cells; a multiplicity the electron count no longer allows goes
+        to the lowest one it allows. The space group goes: the larger cell has other
+        translations.
+
+        :raises ValueError: for a molecule or a count below 1; nothing changes then.
+        """
+        if self.cell is None:
+            raise ValueError('A molecule has no unit cell to repeat.')
+        counts = (na, nb, nc)
+        if not all(isinstance(count, int) and count >= 1 for count in counts):
+            raise ValueError('A supercell holds at least one cell along each of a, b, c.')
+        if counts == (1, 1, 1):
+            return
+        cell = self.cell
+        atoms = []
+        for image in itertools.product(*(range(count) for count in counts)):
+            shift = cell.cartesian(*image)
+            for atom in self.atoms:
+                label = f'{atom.element}{len(atoms) + 1}'
+                atoms.append(Atom(label, atom.element, atom.x + shift[0], atom.y + shift[1], atom.z + shift[2], atom.fixed))
+        self.cell = Cell(tuple(tuple(count * x for x in vector) for vector, count in zip(cell.vectors, counts)))
+        _wrap(atoms, self.cell)
+        self.atoms = atoms
+        self.charge *= math.prod(counts)
+        self._electrons_changed()
 
 
 def read_xyz(text: str) -> tuple[list[Atom], Optional[Cell]]:
@@ -439,7 +501,8 @@ def read_cif(text: str) -> tuple[list[Atom], Cell]:
             raise ValueError(f'Site {site.label}: "{site.type_symbol}" is not an element.')
         if site.occ < 1 - _OCCUPANCY_TOLERANCE:
             raise ValueError('The file has partially occupied sites.')
-    cell = Cell.from_parameters(*structure.cell.parameters, space_group=_space_group(gemmi, structure))
+    symbol, number = _space_group(gemmi, structure)
+    cell = Cell.from_parameters(*structure.cell.parameters, space_group=symbol, space_group_number=number)
     atoms = []
     for number, site in enumerate(structure.get_all_unit_cell_sites(), start=1):
         element = site.element.name
@@ -447,13 +510,15 @@ def read_cif(text: str) -> tuple[list[Atom], Cell]:
     return atoms, cell
 
 
-def _space_group(gemmi, structure) -> str:
-    """'Fm-3m' from the Hermann-Mauguin symbol, else from the symmetry operations; '' if neither."""
+def _space_group(gemmi, structure) -> tuple[str, int]:
+    """('Fm-3m', 225) from the Hermann-Mauguin symbol, else from the symmetry operations;
+    ('', 0) if neither. A symbol gemmi does not know is kept, with number 0."""
     if structure.spacegroup_hm:
         group = gemmi.find_spacegroup_by_name(structure.spacegroup_hm)
-        return group.short_name() if group else structure.spacegroup_hm.replace(' ', '')
+        return (group.short_name(), group.number) if group else (structure.spacegroup_hm.replace(' ', ''), 0)
     structure.determine_and_set_spacegroup('S')
-    return structure.spacegroup.short_name() if structure.spacegroup else ''
+    group = structure.spacegroup
+    return (group.short_name(), group.number) if group else ('', 0)
 
 
 def _wrap(atoms: list[Atom], cell: Cell) -> None:

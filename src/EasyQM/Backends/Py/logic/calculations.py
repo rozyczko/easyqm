@@ -15,6 +15,8 @@ class CalculationType(Enum):
     GEOMETRY_OPTIMISATION = 'geometry_optimisation'
     VIBRATIONAL_FREQUENCIES = 'vibrational_frequencies'
     EXCITED_STATES = 'excited_states'
+    BAND_STRUCTURE = 'band_structure'
+    DENSITY_OF_STATES = 'density_of_states'
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,22 @@ CATALOGUE = (
         'ORCA: TD-DFT or EOM-CCSD',
         systems=('molecule',),
     ),
+    CalculationInfo(
+        CalculationType.BAND_STRUCTURE,
+        'Band structure',
+        'Electronic bands along a high-symmetry path through the Brillouin zone',
+        'E(k), band gap, direct or indirect',
+        'Runs after the SCF',
+        systems=('crystal',),
+    ),
+    CalculationInfo(
+        CalculationType.DENSITY_OF_STATES,
+        'Density of states',
+        'Electronic density of states on a denser k-point grid',
+        'DOS(E), Fermi energy, band gap',
+        'Runs after the SCF',
+        systems=('crystal',),
+    ),
 )
 _SYSTEM_NAMES = {'molecule': 'Molecules', 'crystal': 'Periodic systems'}
 
@@ -66,6 +84,9 @@ _WORKFLOW_ORDER = (
     CalculationType.SINGLE_POINT,
     CalculationType.VIBRATIONAL_FREQUENCIES,
     CalculationType.EXCITED_STATES,
+    # Last: they change the ground state's files, which the phonons read.
+    CalculationType.BAND_STRUCTURE,
+    CalculationType.DENSITY_OF_STATES,
 )
 
 # Option choices as (value, label) pairs, next to the dataclass they belong to.
@@ -125,6 +146,18 @@ class ExcitedStatesOptions:
     frozen_core: bool = True
 
 
+@dataclass
+class BandStructureOptions:
+    points: int = 100  # along the whole path, spread by length
+    empty_bands: int = 8  # computed above the filled ones
+
+
+@dataclass
+class DensityOfStatesOptions:
+    grid_factor: int = 2  # the k-point grid is the SCF grid times this along each axis
+    empty_bands: int = 8
+
+
 class Calculations:
     def __init__(self):
         self.periodic = False  # the sample's kind, which some calculations do not allow
@@ -136,6 +169,8 @@ class Calculations:
         self.geometry_optimisation = GeometryOptimisationOptions()
         self.vibrational_frequencies = VibrationalFrequenciesOptions()
         self.excited_states = ExcitedStatesOptions()
+        self.band_structure = BandStructureOptions()
+        self.density_of_states = DensityOfStatesOptions()
 
     def is_selected(self, calculation: CalculationType) -> bool:
         return calculation in self.selected

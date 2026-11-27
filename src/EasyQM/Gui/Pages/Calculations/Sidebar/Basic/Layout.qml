@@ -37,6 +37,20 @@ EaComponents.SideBarColumn {
         Loader { source: 'Groups/ExcitedStates.qml' }
     }
 
+    EaElements.GroupBox {
+        title: qsTr('Band structure')
+        icon: 'chart-line'
+
+        Loader { source: 'Groups/BandStructure.qml' }
+    }
+
+    EaElements.GroupBox {
+        title: qsTr('Density of states')
+        icon: 'chart-area'
+
+        Loader { source: 'Groups/DensityOfStates.qml' }
+    }
+
     // PoC1 placeholder: no controls behind it yet.
     EaElements.GroupBox {
         title: qsTr('Electronic properties')

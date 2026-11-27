@@ -26,6 +26,7 @@ dependencies = [
   'gemmi',           # Reading and parsing CIF files
   'chemcoord',       # Z-matrix <-> Cartesian conversion for molecules
   'pointgroup',      # Point group of a molecule
+  'spglib>=2.5',     # Space group of a crystal
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,9 @@ dev = [
 llm = [
   'anthropic>=1.1,<2',        # Claude API client
   'keyring',                  # Remembering the API key in the system credential store
+]
+voice = [
+  'faster-whisper',           # Speech recognition on this computer, for talking to the assistant
 ]
 
 [project.urls]

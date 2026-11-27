@@ -38,6 +38,7 @@ from Backends.Py.method import Method
 from Backends.Py.project import Project
 from Backends.Py.results import Results
 from Backends.Py.sample import Sample
+from Backends.Py.voice import Voice
 from Backends.Py.workspace import MAX_STRICT_OPTIONAL
 from Backends.Py.workspace import MAX_STRICT_TOOLS
 from Backends.Py.workspace import TOOLS
@@ -46,6 +47,8 @@ from Backends.Py.workspace import Outcome
 from Backends.Py.workspace import Workspace
 from Backends.Py.workspace import data_text
 from Backends.Py.workspace import facts_text
+from fakes import FakeRecogniser
+from fakes import FakeSpeaker
 from fakes import ScriptAdapter
 from fakes import emissions
 
@@ -716,6 +719,60 @@ def test_waiting_for_an_approval_does_not_count_towards_the_time_limit(chat, qco
     chat.assistant.answerApproval(chat.assistant.approval['id'], True)
     _wait(lambda: not chat.assistant.busy, qcore_application)
     assert len(client.requests) == 2 and chat.assistant.messages[-1]['text'] == 'Changed.'
+
+
+@pytest.fixture
+def spoken(chat):
+    """The chat with answers read aloud by a fake speaker."""
+    chat.speaker = FakeSpeaker()
+    chat.assistant.shutdown()
+    chat.assistant = Assistant(chat.workspace, chat.settings, delay_ms=10,
+                               voice=Voice(chat.settings, recogniser=FakeRecogniser(), speaker=chat.speaker))
+    chat.assistant._disclosed = True
+    chat.settings.setReadAloud(True)
+    yield chat
+    chat.assistant.shutdown()
+
+
+def test_the_answer_is_read_aloud_without_the_actions(spoken, qcore_application):
+    spoken.script(_message(_text('Setting the basis.'), _tool('t1', 'set_method', {'basis_set': 'cc-pVDZ'}),
+                           stop='tool_use'),
+                  _message(_text('Done: **cc-pVDZ**.')))
+    _turn(spoken, 'Use cc-pVDZ', qcore_application)
+    assert [item['role'] for item in spoken.assistant.messages] == ['user', 'assistant', 'action', 'assistant']
+    assert spoken.speaker.said == ['Setting the basis. Done: cc-pVDZ.']
+
+    spoken.script(_message(_text('It is cc-pVDZ.')))
+    spoken.assistant.send('Which basis?')  # the user talks over the answer being read
+    assert spoken.speaker.stops == 1
+    _wait(lambda: not spoken.assistant.busy, qcore_application)
+    assert spoken.speaker.said[-1] == 'It is cc-pVDZ.'
+
+
+def test_nothing_is_read_aloud_when_turned_off(spoken, qcore_application):
+    spoken.settings.setReadAloud(False)
+    spoken.script(_message(_text('Done.')))
+    _turn(spoken, 'Hello', qcore_application)
+    assert spoken.speaker.said == [] and spoken.assistant.messages[-1]['text'] == 'Done.'
+
+
+def test_clearing_drops_a_transcript_still_being_recognised(chat, qcore_application):
+    gate = threading.Event()
+    chat.settings.setSpeechInput(True)
+    voice = Voice(chat.settings, recogniser=FakeRecogniser('the old question', gate=gate))
+    chat.assistant.shutdown()
+    chat.assistant = Assistant(chat.workspace, chat.settings, delay_ms=10, voice=voice)
+    texts = emissions(voice.transcribed)
+
+    voice.recognise(b'\x00\x00' * 16000, 16000, 1, 'int16')
+    chat.assistant.clear()
+    assert not voice.transcribing
+    gate.set()
+    deadline = time.monotonic() + 0.3
+    while time.monotonic() < deadline:
+        qcore_application.processEvents()
+    assert texts == []
+    chat.assistant.shutdown()
 
 
 def test_a_declined_action_skips_the_rest_of_its_step(chat, qcore_application):

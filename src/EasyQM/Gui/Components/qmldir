@@ -8,6 +8,9 @@ AtomStyle 1.0 AtomStyle.js
 LogView LogView.qml
 StatTile StatTile.qml
 StickSpectrum StickSpectrum.qml
+BandStructurePlot BandStructurePlot.qml
+DosPlot DosPlot.qml
+SpaceGroupWarning SpaceGroupWarning.qml
 MessageDialog MessageDialog.qml
 AssistantPanel AssistantPanel.qml
 AssistantSettingsDialog AssistantSettingsDialog.qml

@@ -26,7 +26,7 @@ Column {
         EaElements.TextField {
             width: parent.width
             horizontalAlignment: TextInput.AlignLeft
-            validator: DoubleValidator { bottom: 0.0 }
+            validator: DoubleValidator { bottom: 0.0; locale: 'C' }  // a decimal point, as parseFloat reads it
             text: Globals.BackendWrapper.calculationsFreqTemperature
             onEditingFinished: Globals.BackendWrapper.calculationsSetFreqTemperature(parseFloat(text))
         }
@@ -38,7 +38,7 @@ Column {
         EaElements.TextField {
             width: parent.width
             horizontalAlignment: TextInput.AlignLeft
-            validator: DoubleValidator { bottom: 0.0 }
+            validator: DoubleValidator { bottom: 0.0; locale: 'C' }
             text: Globals.BackendWrapper.calculationsFreqPressure
             onEditingFinished: Globals.BackendWrapper.calculationsSetFreqPressure(parseFloat(text))
         }
